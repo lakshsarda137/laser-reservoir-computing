@@ -4,7 +4,7 @@ Read this first, then `context.md` (the assignment), `explanation_instructions.m
 
 ## Current state
 
-`laser_reservoir.ipynb` has six sections (0–5), all working. The whole notebook runs in about 1.5 minutes. Section 4 loads its search results from `results/tau_c_sweep.json`; deleting that file makes it recompute them (about 4 extra minutes).
+`laser_reservoir.ipynb` has six sections (0–5), all working. The whole notebook runs in about 1.5 minutes. Section 4 loads its search results from `results/tau_c_sweep.json`; deleting that file makes it recompute them (about 8 extra minutes).
 
 | Notebook section | What it does | Result (test NMSE) |
 |---|---|---|

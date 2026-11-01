@@ -73,7 +73,7 @@ Non-obvious choices in `laser_reservoir.ipynb`, and why they were made.
 | Drive settings | re-tuned for each τ_c with the Section 3 grid | Each particle gets its best drive settings, so we compare particles, not one fixed drive. |
 | Solver step | 0.001 τ for τ_c = 0.003, else 0.005 τ | The step must stay well below τ_c. |
 | Step test | pump 1.05 → 1.15, settled = within 1% | Near the operating point of Laser B. |
-| Saved results | `results/tau_c_sweep.json` | The search takes about 4 minutes. The notebook loads the file; delete it to recompute. |
+| Saved results | `results/tau_c_sweep.json` | The search takes about 8 minutes inside the notebook. The notebook loads the file; delete it to recompute. |
 
 ## Noise (Section 5)
 
