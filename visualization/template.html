@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laser Reservoir</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* One scene, read left to right: inputs → pump → laser particle → delay loop back to the pump. Dark lab bench so the laser glow reads. */
+:root {
+  --bg: #0c0f0e;
+  --panel: #131816;
+  --ink: #e8ece9;
+  --muted: #8e9a94;
+  --line: #26302c;
+  --pump: #4fd16a;
+  --laser: #ff5a4e;
+  --loop: #f2a33a;
+  --font-display: "Archivo Narrow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 40px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-family: var(--font-display); font-size: 2.2rem; font-weight: 700; margin: 0; }
+p { margin: 0; max-width: 70ch; }
+.muted { color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--panel); }
+.seg button { font: 600 1rem var(--font-body); border: 0; background: transparent; color: var(--muted); padding: 8px 18px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--loop); color: #1a1205; }
+.seg button.off[aria-pressed="true"] { background: var(--muted); color: var(--bg); }
+.play { font: 600 1rem var(--font-body); border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 18px; border-radius: 999px; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--laser); outline-offset: 2px; }
+.stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+canvas { width: 100%; display: block; }
+#scene { height: auto; aspect-ratio: 1000 / 470; }
+#pred { height: 150px; }
+.verdict { font-size: 1.1rem; }
+.verdict b { font-family: var(--font-display); font-size: 1.5rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.9rem; color: var(--muted); }
+.legend i { display: inline-block; width: 16px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.note { font-size: 0.88rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <h1>Laser Reservoir</h1>
+  <p class="muted">Each input number changes the pump light hitting a tiny laser. The laser's glow is recorded and used to predict the NARMA10 answer, which depends on inputs from up to 9 steps ago. So the laser has to keep a trace of old inputs. Each input has its own colour, so you can see how long it lingers.</p>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Delay loop">
+      <button id="on" aria-pressed="true">Delay loop on</button>
+      <button id="off" class="off" aria-pressed="false">Delay loop off</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="play" id="play">▶ Play</button>
+      <button class="play" id="step">Step</button>
+    </div>
+  </div>
+
+  <div class="stage"><canvas id="scene" aria-label="Animated laser reservoir"></canvas></div>
+
+  <p class="verdict" id="verdict"></p>
+
+  <div class="stage"><canvas id="pred" aria-label="Prediction against the true answer"></canvas></div>
+  <div class="legend"><span><i style="background:var(--ink)"></i>true answer</span><span><i style="background:var(--laser)"></i>prediction from the laser</span></div>
+  <p class="note">Live simulation of the notebook's model (rate equations from Cho et al. 2016, 100 recordings per input). "Loop off" uses the best settings found without a loop. Score is test NMSE: 0 is perfect, lower is better. For comparison, the software reservoir (ESN) scores 0.067.</p>
+</div>
+
+<script>
+/*CORE*/
+</script>
+<script>
+(() => {
+  const CONFIGS = {
+    on: { pBias: 1.1, gamma: 0.05, theta: 0.2, eta: 0.3, loop: true, tauC: 0.01 },
+    off: { pBias: 0.8, gamma: 2, theta: 0.005, eta: 0, loop: false, tauC: 0.01 },
+  };
+  const N = 100, STEP_MS = 1100, HISTORY = 12;
+  const $ = (id) => document.getElementById(id);
+  const data = Core.narma10(Core.K, 42);
+  const TEST0 = Core.SPLIT.washout + Core.SPLIT.train + Core.SPLIT.val;
+  const models = {};
+  let mode = "on", k = TEST0 + 30, phase = 0, playing = false, lastT = null;
+
+  function build(cfg) {
+    const sim = Core.simulate(cfg, data.u, Core.makeMask(N, 1));
+    const fit = Core.trainReadout(sim.states, N, data.u, data.d);
+    const curves = Core.memoryCurves(sim.states, N, data.u, HISTORY - 1);
+    // Glow scale: output range over the test set
+    const per = N * sim.S, tr = sim.traceL.subarray((TEST0 - 1) * per);
+    let lo = Infinity, hi = -Infinity;
+    for (const v of tr) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return { sim, fit, curves, lo, hi };
+  }
+
+  const hue = (i) => (i * 137.5) % 360;
+  const color = (i, a = 1) => `hsla(${hue(i)}, 85%, 62%, ${a})`;
+
+  // ---- layout in scene units (1000 × 470) ----
+  const L = {
+    conveyorY: 170, pumpX0: 270, pumpX1: 430,
+    rod: { x: 470, y: 146, w: 190, h: 48 },
+    loop: { x0: 700, x1: 930, top: 170, bottom: 300, back: 350 },
+    stripY: 400,
+  };
+  function loopPath() {
+    // from the right end of the rod, out to the right, down, back left under the scene, up into the pump
+    const r = L.rod, lp = L.loop, y = r.y + r.h / 2;
+    return [[r.x + r.w, y], [lp.x1, y], [lp.x1, lp.bottom], [lp.back, lp.bottom], [lp.back, y + 18], [L.pumpX1 - 10, y + 18]];
+  }
+  function along(path, f) {
+    const seg = [];
+    let total = 0;
+    for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]); seg.push(d); total += d; }
+    let t = f * total;
+    for (let i = 0; i < seg.length; i++) {
+      if (t <= seg[i]) { const a = t / seg[i]; return [path[i][0] + (path[i + 1][0] - path[i][0]) * a, path[i][1] + (path[i + 1][1] - path[i][1]) * a]; }
+      t -= seg[i];
+    }
+    return path[path.length - 1];
+  }
+
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function drawScene() {
+    const c = $("scene"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const g = c.getContext("2d"), s = W / 1000;
+    g.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
+    g.clearRect(0, 0, 1000, 470);
+    const m = models[mode], ink = css("--ink"), muted = css("--muted"), line = css("--line");
+    const font = (px, w = 600) => `${w} ${px}px ${css("--font-body")}`;
+    g.textAlign = "center"; g.textBaseline = "middle";
+
+    // ---- inputs on the conveyor ----
+    g.fillStyle = muted; g.font = font(15); g.fillText("inputs", 120, 80);
+    g.strokeStyle = line; g.lineWidth = 2; g.beginPath(); g.moveTo(20, L.conveyorY); g.lineTo(L.pumpX0, L.conveyorY); g.stroke();
+    const spacing = 62;
+    for (let i = 4; i >= 0; i--) {
+      const idx = k + i, u = data.u[idx];
+      let x = L.pumpX0 - 30 - i * spacing + phase * spacing;
+      let a = 1;
+      if (i === 0) { x = L.pumpX0 - 30 + Math.min(phase / 0.35, 1) * 90; a = 1 - Math.min(phase / 0.35, 1); }
+      if (x < 25) continue;
+      const r = 7 + 34 * u;
+      g.fillStyle = color(idx, a); g.beginPath(); g.arc(x, L.conveyorY, r, 0, 7); g.fill();
+      if (a > 0.5) { g.fillStyle = "#0c0f0e"; g.font = font(11, 700); g.fillText(u.toFixed(2), x, L.conveyorY); }
+    }
+    g.fillStyle = muted; g.font = font(13, 400); g.fillText("bigger dot = bigger number", 130, L.conveyorY + 52);
+
+    // ---- pump light ----
+    const pumpCol = css("--pump"), y0 = L.rod.y + L.rod.h / 2;
+    g.fillStyle = muted; g.font = font(15); g.fillText("pump light", (L.pumpX0 + L.pumpX1) / 2, 80);
+    const tint = color(k, 0.9);
+    for (let w = 0; w < 3; w++) {
+      g.strokeStyle = w === 1 ? tint : pumpCol; g.globalAlpha = w === 1 ? Math.max(0, 1 - phase * 1.2) : 0.85; g.lineWidth = 3;
+      g.beginPath();
+      for (let x = L.pumpX0; x <= L.pumpX1; x += 4) {
+        const yy = y0 - 8 + w * 8 + 5 * Math.sin((x - L.pumpX0) / 14 - phase * 12 + w);
+        x === L.pumpX0 ? g.moveTo(x, yy) : g.lineTo(x, yy);
+      }
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+
+    // ---- laser particle: glow from the simulated output during this input ----
+    const per = N * m.sim.S, sIdx = Math.min(per - 1, Math.floor(phase * per));
+    const Lnow = m.sim.traceL[k * per + sIdx];
+    const level = Math.max(0, Math.min(1, (Lnow - m.lo) / (m.hi - m.lo + 1e-12)));
+    const laserCol = css("--laser"), r = L.rod, cx = r.x + r.w / 2;
+    const glow = g.createRadialGradient(cx, y0, 10, cx, y0, 150);
+    glow.addColorStop(0, `rgba(255, 90, 78, ${0.15 + 0.6 * level})`); glow.addColorStop(1, "rgba(255, 90, 78, 0)");
+    g.fillStyle = glow; g.fillRect(cx - 160, y0 - 160, 320, 320);
+    // memory bands inside the rod: colours of recent inputs, as strong as the laser still holds them
+    g.save(); g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 22); g.clip();
+    g.fillStyle = "#2a1513"; g.fillRect(r.x, r.y, r.w, r.h);
+    const mem = m.curves.memory;
+    let xb = r.x + r.w;
+    for (let j = 0; j < HISTORY; j++) {
+      const strength = Math.max(0, mem[j]), w = (r.w / HISTORY);
+      xb -= w;
+      g.fillStyle = color(k - j, 0.15 + 0.85 * strength * strength); g.fillRect(xb, r.y, w + 0.5, r.h);
+    }
+    g.restore();
+    g.strokeStyle = laserCol; g.lineWidth = 2 + 4 * level; g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 22); g.stroke();
+    g.fillStyle = ink; g.font = font(15); g.fillText("laser particle", cx, 80);
+    g.fillStyle = muted; g.font = font(13, 400); g.fillText("glow = laser output, recorded 100× per input", cx, 108);
+
+    // ---- delay loop ----
+    const path = loopPath(), loopOn = mode === "on", loopCol = css("--loop");
+    g.strokeStyle = loopOn ? loopCol : line; g.lineWidth = loopOn ? 3 : 2; g.setLineDash(loopOn ? [] : [6, 6]);
+    g.beginPath(); path.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.setLineDash([]);
+    // arrow head into the pump
+    const [ax, ay] = path[path.length - 1];
+    g.fillStyle = loopOn ? loopCol : line; g.beginPath(); g.moveTo(ax - 2, ay); g.lineTo(ax + 12, ay - 7); g.lineTo(ax + 12, ay + 7); g.fill();
+    g.fillStyle = loopOn ? loopCol : muted; g.font = font(15);
+    g.fillText(loopOn ? "delay loop: part of the glow is fed back into the pump" : "no delay loop", (L.loop.back + L.loop.x1) / 2, L.loop.bottom + 24);
+    if (loopOn) {
+      // the light packet from the previous input travels around during this input
+      const [px, py] = along(path, phase);
+      g.fillStyle = color(k - 1, 0.95); g.beginPath(); g.arc(px, py, 9, 0, 7); g.fill();
+      g.strokeStyle = loopCol; g.lineWidth = 2; g.stroke();
+    }
+
+    // ---- memory strip ----
+    g.textAlign = "left"; g.fillStyle = ink; g.font = font(15);
+    g.fillText("What the laser still holds", 40, L.stripY - 44);
+    const x0 = 40, dx = 72;
+    for (let j = 0; j < HISTORY; j++) {
+      const x = x0 + (HISTORY - 1 - j) * dx + 18, strength = Math.max(0, mem[j]);
+      g.strokeStyle = line; g.lineWidth = 1.5; g.beginPath(); g.arc(x, L.stripY, 15, 0, 7); g.stroke();
+      g.fillStyle = color(k - j, Math.max(0.04, strength * strength)); g.beginPath(); g.arc(x, L.stripY, 15, 0, 7); g.fill();
+      g.textAlign = "center"; g.fillStyle = muted; g.font = font(12, 400);
+      g.fillText(j === 0 ? "now" : `${j} ago`, x, L.stripY + 28);
+    }
+    // NARMA10 marker at 9 steps ago
+    const x9 = x0 + (HISTORY - 1 - 9) * dx + 18;
+    g.strokeStyle = ink; g.globalAlpha = 0.6; g.setLineDash([3, 4]);
+    g.beginPath(); g.moveTo(x9 - 26, L.stripY - 26); g.lineTo(x9 - 26, L.stripY + 40); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    g.textAlign = "left"; g.fillStyle = muted; g.font = font(12, 400);
+    g.fillText("↑ NARMA10 needs inputs back to here", x9 - 30, L.stripY + 52);
+  }
+
+  function drawPred() {
+    const c = $("pred"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const g = c.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    const m = models[mode], n = 50, k0 = k - n + 1, lo = 0.1, hi = 0.8;
+    const X = (i) => 12 + ((W - 24) * i) / (n - 1), Y = (v) => 10 + (H - 20) * (1 - (v - lo) / (hi - lo));
+    for (const [arr, col, w] of [[data.d, css("--ink"), 2], [m.fit.pred, css("--laser"), 2]]) {
+      g.strokeStyle = col; g.lineWidth = w; g.beginPath();
+      for (let i = 0; i < n; i++) { const x = X(i), y = Y(arr[k0 + i]); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+      g.stroke(); g.fillStyle = col; g.beginPath(); g.arc(X(n - 1), Y(arr[k]), 4, 0, 7); g.fill();
+    }
+  }
+
+  function verdict() {
+    const m = models[mode], mem = m.curves.memory;
+    let held = 0;
+    while (held < mem.length && mem[held] > 0.5) held++;
+    const steps = held >= HISTORY ? `${HISTORY - 1}+` : String(Math.max(0, held - 1));
+    $("verdict").innerHTML = mode === "on"
+      ? `Loop on: the laser still holds inputs from <b>${steps}</b> steps ago. Prediction score <b>${m.fit.testNmse.toFixed(2)}</b>.`
+      : `Loop off: the laser holds inputs from only <b>${steps}</b> steps ago. Prediction score <b>${m.fit.testNmse.toFixed(2)}</b>.`;
+  }
+
+  function draw() { drawScene(); drawPred(); }
+
+  function next() {
+    k = k + 1 >= Core.K ? TEST0 + 30 : k + 1;
+  }
+  function frame(t) {
+    if (playing) {
+      if (lastT !== null) phase += (t - lastT) / STEP_MS;
+      while (phase >= 1) { phase -= 1; next(); }
+    }
+    lastT = t;
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function setMode(m) {
+    mode = m;
+    $("on").setAttribute("aria-pressed", m === "on"); $("off").setAttribute("aria-pressed", m === "off");
+    verdict(); draw();
+  }
+  $("on").addEventListener("click", () => setMode("on"));
+  $("off").addEventListener("click", () => setMode("off"));
+  $("play").addEventListener("click", () => { playing = !playing; $("play").textContent = playing ? "❚❚ Pause" : "▶ Play"; });
+  $("step").addEventListener("click", () => { playing = false; $("play").textContent = "▶ Play"; phase = 0; next(); draw(); });
+
+  models.on = build(CONFIGS.on);
+  models.off = build(CONFIGS.off);
+  phase = 0.45;
+  setMode("on");
+  new ResizeObserver(draw).observe($("scene"));
+  requestAnimationFrame(frame);
+})();
+</script>

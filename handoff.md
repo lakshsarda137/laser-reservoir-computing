@@ -4,7 +4,7 @@ Read this first, then `context.md` (the assignment), `explanation_instructions.m
 
 ## Current state
 
-`laser_reservoir.ipynb` has five sections, all working. The whole notebook runs in about 1 minute. Section 4 loads its search results from `results/tau_c_sweep.json`; deleting that file makes it recompute them (about 4 extra minutes).
+`laser_reservoir.ipynb` has six sections (0–5), all working. The whole notebook runs in about 1.5 minutes. Section 4 loads its search results from `results/tau_c_sweep.json`; deleting that file makes it recompute them (about 4 extra minutes).
 
 | Notebook section | What it does | Result (test NMSE) |
 |---|---|---|
@@ -13,6 +13,7 @@ Read this first, then `context.md` (the assignment), `explanation_instructions.m
 | 2 | Laser rate equations (Cho et al. PRL 2016), checked against theory | threshold, turn-on delay, relaxation period all match |
 | 3 | Laser as reservoir: A = no feedback, B = delay loop, tuned on validation | A: 0.648, B: 0.115. Linear memory reference: 0.326 |
 | 4 | Exploration: photon lifetime τ_c = 0.003–0.3 | B: 0.131 → best 0.081 (τ_c = 0.1) → 0.109. A stays ≥ 0.44 |
+| 5 | The laser's own quantum noise, re-tuned, β = 1e-2 to 1e-5 | B: 0.61–0.71, A: 0.70–0.77 |
 
 **Main findings:**
 - The laser particle alone (A) fails NARMA10. Its memory lasts about 2 input steps; NARMA10 needs 9.
@@ -21,9 +22,11 @@ Read this first, then `context.md` (the assignment), `explanation_instructions.m
 
 **History worth knowing (to explain if asked):** the first Section 3 grid used γ ≥ 0.5 and gave B = 0.46. That led to a wrong early conclusion that memory was B's main limit. Widening the grid to small γ fixed it.
 
-## Biggest open issue: no noise
+**Visualization:** `visualization/` holds one animated scene that runs the laser reservoir live in the browser, with a delay-loop on/off switch. Edit `template.html` or `core.js`, then run `python3 visualization/build.py` to rebuild `laser_reservoir.html`. View it on localhost: `python3 -m http.server 8000 --directory visualization`, then open http://localhost:8000/laser_reservoir.html. Do not publish it as a claude.ai artifact. `node visualization/test_core.js` checks the browser simulation against the notebook (Laser B, N = 100: test NMSE ≈ 0.13).
 
-The model has no noise, so tiny pump changes are read perfectly. The best γ (0.05) is the smallest value tried, and smaller γ would only exploit this. A real laser has noise. **Adding noise (for example spontaneous emission noise in the rate equations, or detector noise on the recordings) is the most important next step**, and will likely make the laser scores worse.
+## Noise (Section 5, done)
+
+With the laser's own quantum noise, the laser reservoir loses its advantage: Laser B scores 0.67 at β = 1e-3 and at best 0.61 with about 15,000 photons, worse than the linear memory reference (0.33). Near threshold the noise in each recording is about 20× the change the inputs cause. The search is in `scripts/noise_search.py` (about 5 minutes), results in `results/noise_search.json`.
 
 ## Other open points
 
@@ -33,7 +36,8 @@ The model has no noise, so tiny pump changes are read perfectly. The best γ (0.
 
 ## Remaining deliverables (from `context.md`)
 
-- 3–5 slide presentation: approach, results, next steps.
+- 3–5 slide presentation: approach, results (including noise), next steps.
+- Visualization redesign agreed but not built: one frame, input → [reservoir: pump, laser, loop, 100 recordings] → weights → Σ → prediction, with a loop on/off switch and the prediction vs truth line. The current `visualization/` page is the older one-scene version.
 - Check that the notebook runs in Colab.
 - Commit and push (only when I ask).
 

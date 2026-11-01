@@ -75,9 +75,24 @@ Non-obvious choices in `laser_reservoir.ipynb`, and why they were made.
 | Step test | pump 1.05 → 1.15, settled = within 1% | Near the operating point of Laser B. |
 | Saved results | `results/tau_c_sweep.json` | The search takes about 4 minutes. The notebook loads the file; delete it to recompute. |
 
+## Noise (Section 5)
+
+| Choice | Value | Why |
+|---|---|---|
+| Noise source | the laser's own quantum noise: every process (pump, stimulated emission, spontaneous emission into the mode, other spontaneous emission, photon loss) has Poisson statistics, variance = rate × dt | It follows from the physics, with no new free parameter. Its size is set by the photon number. |
+| Pump noise | included (Poisson) | A pump laser's photons also arrive at random. A quieter pump would help a little. |
+| Detector noise | not included | Quantum noise alone already dominates. |
+| Solver | Euler–Maruyama, step 0.0025 τ (τ_c / 4), raw numbers N₁ and q | Standard method for equations with random terms. Without noise it gives the same score as the RK4 solver (0.106 vs 0.107). |
+| Negative numbers | N₁ and q clipped at 0 | Random steps can push small numbers below 0. |
+| Re-tuning | new grid searched with noise on: A 48 settings, B 150 settings (γ up to 1.0, p_bias up to 3.0), for β = 1e-2 to 1e-5 | With noise, a larger input may win. Same validation method as Section 3. |
+| Noise seed | the same as the mask seed | Each test repeat gets its own mask and its own noise. |
+| Search location | `scripts/noise_search.py`, results in `results/noise_search.json` | It takes about 5 minutes with 8 processes, too slow to rerun inside the notebook. Same data, split, masks, solver and readout as the notebook. |
+| Recording | value at the end of the slot (as before); slot average checked as an alternative | A real detector integrates light over the slot. Averaging helped a little (0.649 → 0.544) without changing the conclusion. |
+
 ## Open points
 
 - Our ESN gets test NMSE ≈ 0.067 (NRMSE ≈ 0.26). Appeltant's traditional RC reports NMSE ≈ 0.032. Their reservoir design and training length are not fully given, so this gap is not resolved.
 - With γ ≥ 0.5, stronger feedback (η = 0.6–0.9) gave worse scores. With γ = 0.05, η = 0.6–0.9 is best at large τ_c. Not fully explained.
-- No noise in the laser model, so laser scores are likely optimistic. The best γ (0.05) is exactly what noise would hurt. Adding noise is the most important next step.
+- With the laser's own noise, Laser B scores 0.61–0.71 (Section 5), worse than the linear memory reference. Untested ways round this: many more photons, a pump far above threshold, averaging repeated runs or many particles, or a task needing less memory.
+- In the noise search, some best settings sit at the grid edge (γ = 1.0, p_bias = 1.1).
 - At τ_c = 0.3, several best settings sit at the grid edge.

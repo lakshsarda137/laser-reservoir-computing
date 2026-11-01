@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laser Reservoir</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* One scene, read left to right: inputs → pump → laser particle → delay loop back to the pump. Dark lab bench so the laser glow reads. */
+:root {
+  --bg: #0c0f0e;
+  --panel: #131816;
+  --ink: #e8ece9;
+  --muted: #8e9a94;
+  --line: #26302c;
+  --pump: #4fd16a;
+  --laser: #ff5a4e;
+  --loop: #f2a33a;
+  --font-display: "Archivo Narrow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 40px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-family: var(--font-display); font-size: 2.2rem; font-weight: 700; margin: 0; }
+p { margin: 0; max-width: 70ch; }
+.muted { color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--panel); }
+.seg button { font: 600 1rem var(--font-body); border: 0; background: transparent; color: var(--muted); padding: 8px 18px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--loop); color: #1a1205; }
+.seg button.off[aria-pressed="true"] { background: var(--muted); color: var(--bg); }
+.play { font: 600 1rem var(--font-body); border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 18px; border-radius: 999px; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--laser); outline-offset: 2px; }
+.stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+canvas { width: 100%; display: block; }
+#scene { height: auto; aspect-ratio: 1000 / 470; }
+#pred { height: 150px; }
+.verdict { font-size: 1.1rem; }
+.verdict b { font-family: var(--font-display); font-size: 1.5rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.9rem; color: var(--muted); }
+.legend i { display: inline-block; width: 16px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.note { font-size: 0.88rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <h1>Laser Reservoir</h1>
+  <p class="muted">Each input number changes the pump light hitting a tiny laser. The laser's glow is recorded and used to predict the NARMA10 answer, which depends on inputs from up to 9 steps ago. So the laser has to keep a trace of old inputs. Each input has its own colour, so you can see how long it lingers.</p>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Delay loop">
+      <button id="on" aria-pressed="true">Delay loop on</button>
+      <button id="off" class="off" aria-pressed="false">Delay loop off</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="play" id="play">▶ Play</button>
+      <button class="play" id="step">Step</button>
+    </div>
+  </div>
+
+  <div class="stage"><canvas id="scene" aria-label="Animated laser reservoir"></canvas></div>
+
+  <p class="verdict" id="verdict"></p>
+
+  <div class="stage"><canvas id="pred" aria-label="Prediction against the true answer"></canvas></div>
+  <div class="legend"><span><i style="background:var(--ink)"></i>true answer</span><span><i style="background:var(--laser)"></i>prediction from the laser</span></div>
+  <p class="note">Live simulation of the notebook's model (rate equations from Cho et al. 2016, 100 recordings per input). "Loop off" uses the best settings found without a loop. Score is test NMSE: 0 is perfect, lower is better. For comparison, the software reservoir (ESN) scores 0.067.</p>
+</div>
+
+<script>
+// Laser reservoir core: NARMA10, rate equations, virtual nodes, ridge readout.
+// Same model as laser_reservoir.ipynb, in normalized variables:
+//   n = N1 / N_th (carriers),  L = beta*q (output),  p = P / P_th (pump), time in units of tau.
+//   dn/dt = p - n(1 + L)
+//   dL/dt = (n(L + beta) - L) / tau_c
+const Core = (() => {
+  const BETA = 1e-3;
+  const SPLIT = { washout: 100, train: 900, val: 200, test: 400 };
+  const K = SPLIT.washout + SPLIT.train + SPLIT.val + SPLIT.test;
+  const RIDGES = [1e-8, 1e-6, 1e-4, 1e-2, 1];
+
+  function rng(seed) {
+    // mulberry32
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function narma10(nSteps, seed) {
+    const r = rng(seed);
+    const u = new Float64Array(nSteps + 1), y = new Float64Array(nSteps + 1);
+    for (let k = 0; k <= nSteps; k++) u[k] = 0.5 * r();
+    for (let k = 9; k < nSteps; k++) {
+      let s = 0;
+      for (let i = k - 9; i <= k; i++) s += y[i];
+      y[k + 1] = 0.3 * y[k] + 0.05 * y[k] * s + 1.5 * u[k - 9] * u[k] + 0.1;
+    }
+    // target at step k is y(k+1)
+    return { u: u.subarray(0, nSteps), d: y.subarray(1, nSteps + 1) };
+  }
+
+  function makeMask(n, seed) {
+    const r = rng(seed), m = new Float64Array(n);
+    for (let i = 0; i < n; i++) m[i] = 2 * r() - 1;
+    return m;
+  }
+
+  function solverStep(tauC) {
+    return tauC < 0.005 ? 0.001 : 0.005;
+  }
+
+  // Drive the laser with the masked input. Returns the recording at the end of every slot,
+  // plus a few samples per slot of pump and output for plotting.
+  function simulate(cfg, u, mask) {
+    const N = mask.length, dt = solverStep(cfg.tauC);
+    const sps = Math.max(1, Math.round(cfg.theta / dt));
+    const S = Math.min(4, sps);                       // plot samples per slot
+    const sampleAt = new Uint8Array(sps);
+    for (let j = 0; j < S; j++) sampleAt[Math.floor(((j + 1) * sps) / S) - 1] = 1;
+    const delay = N * sps;
+    const hist = new Float64Array(delay);
+    const states = new Float64Array(u.length * N);
+    const traceL = new Float32Array(u.length * N * S), traceP = new Float32Array(u.length * N * S);
+    const eta = cfg.loop ? cfg.eta : 0, tc = cfg.tauC, b = BETA;
+    let n = 0, L = 0, j = 0, t = 0;
+    for (let k = 0; k < u.length; k++) {
+      for (let i = 0; i < N; i++) {
+        const drive = cfg.pBias + cfg.gamma * mask[i] * u[k];
+        for (let s = 0; s < sps; s++) {
+          let p = drive + eta * hist[j];
+          if (p < 0) p = 0;
+          const a1 = p - n * (1 + L), c1 = (n * (L + b) - L) / tc;
+          let n2 = n + 0.5 * dt * a1, L2 = L + 0.5 * dt * c1;
+          const a2 = p - n2 * (1 + L2), c2 = (n2 * (L2 + b) - L2) / tc;
+          n2 = n + 0.5 * dt * a2; L2 = L + 0.5 * dt * c2;
+          const a3 = p - n2 * (1 + L2), c3 = (n2 * (L2 + b) - L2) / tc;
+          n2 = n + dt * a3; L2 = L + dt * c3;
+          const a4 = p - n2 * (1 + L2), c4 = (n2 * (L2 + b) - L2) / tc;
+          n += (dt / 6) * (a1 + 2 * a2 + 2 * a3 + a4);
+          L += (dt / 6) * (c1 + 2 * c2 + 2 * c3 + c4);
+          hist[j] = L;
+          j = j + 1 === delay ? 0 : j + 1;
+          if (sampleAt[s]) { traceL[t] = L; traceP[t] = p; t++; }
+        }
+        states[k * N + i] = L;
+      }
+    }
+    return { states, traceL, traceP, S, N };
+  }
+
+  // Solve (A + ridge*I) w = rhs for symmetric positive definite A (Cholesky). A is d*d, row-major.
+  function ridgeSolve(A, rhs, d, ridge) {
+    const Lm = new Float64Array(d * d);
+    for (let i = 0; i < d; i++) {
+      for (let k = 0; k <= i; k++) {
+        let s = A[i * d + k] + (i === k ? ridge : 0);
+        for (let m = 0; m < k; m++) s -= Lm[i * d + m] * Lm[k * d + m];
+        Lm[i * d + k] = i === k ? Math.sqrt(Math.max(s, 1e-300)) : s / Lm[k * d + k];
+      }
+    }
+    const z = new Float64Array(d), w = new Float64Array(d);
+    for (let i = 0; i < d; i++) {
+      let s = rhs[i];
+      for (let m = 0; m < i; m++) s -= Lm[i * d + m] * z[m];
+      z[i] = s / Lm[i * d + i];
+    }
+    for (let i = d - 1; i >= 0; i--) {
+      let s = z[i];
+      for (let m = i + 1; m < d; m++) s -= Lm[m * d + i] * w[m];
+      w[i] = s / Lm[i * d + i];
+    }
+    return w;
+  }
+
+  // Features: recordings rescaled with training statistics, then optionally [u(k), 1]
+  function buildFeatures(states, N, u, withInput) {
+    const k0 = SPLIT.washout, k1 = k0 + SPLIT.train;
+    const mean = new Float64Array(N), sd = new Float64Array(N);
+    for (let k = k0; k < k1; k++) for (let i = 0; i < N; i++) mean[i] += states[k * N + i];
+    for (let i = 0; i < N; i++) mean[i] /= SPLIT.train;
+    for (let k = k0; k < k1; k++) for (let i = 0; i < N; i++) { const v = states[k * N + i] - mean[i]; sd[i] += v * v; }
+    for (let i = 0; i < N; i++) sd[i] = Math.sqrt(sd[i] / SPLIT.train) + 1e-12;
+    const d = N + (withInput ? 2 : 1);
+    const F = new Float64Array(u.length * d);
+    for (let k = 0; k < u.length; k++) {
+      for (let i = 0; i < N; i++) F[k * d + i] = (states[k * N + i] - mean[i]) / sd[i];
+      if (withInput) { F[k * d + N] = u[k]; F[k * d + N + 1] = 1; } else F[k * d + N] = 1;
+    }
+    return { F, d };
+  }
+
+  function gram(F, d, k0, k1) {
+    const A = new Float64Array(d * d);
+    for (let k = k0; k < k1; k++) {
+      const off = k * d;
+      for (let i = 0; i < d; i++) {
+        const fi = F[off + i];
+        if (fi === 0) continue;
+        for (let m = 0; m <= i; m++) A[i * d + m] += fi * F[off + m];
+      }
+    }
+    for (let i = 0; i < d; i++) for (let m = 0; m < i; m++) A[m * d + i] = A[i * d + m];
+    return A;
+  }
+
+  function project(F, d, target, k0, k1) {
+    const r = new Float64Array(d);
+    for (let k = k0; k < k1; k++) for (let i = 0; i < d; i++) r[i] += F[k * d + i] * target[k];
+    return r;
+  }
+
+  function predict(F, d, w, k) {
+    let s = 0;
+    for (let i = 0; i < d; i++) s += F[k * d + i] * w[i];
+    return s;
+  }
+
+  function nmse(F, d, w, target, k0, k1) {
+    let mean = 0;
+    for (let k = k0; k < k1; k++) mean += target[k];
+    mean /= k1 - k0;
+    let err = 0, v = 0;
+    for (let k = k0; k < k1; k++) {
+      const e = predict(F, d, w, k) - target[k];
+      err += e * e;
+      v += (target[k] - mean) ** 2;
+    }
+    return err / v;
+  }
+
+  // Train the readout like the notebook: ridge chosen on validation, refit on train + validation.
+  function trainReadout(states, N, u, target) {
+    const { F, d } = buildFeatures(states, N, u, true);
+    const tr0 = SPLIT.washout, tr1 = tr0 + SPLIT.train, va1 = tr1 + SPLIT.val, te1 = va1 + SPLIT.test;
+    const Atr = gram(F, d, tr0, tr1), btr = project(F, d, target, tr0, tr1);
+    let best = RIDGES[0], bestScore = Infinity;
+    for (const r of RIDGES) {
+      const s = nmse(F, d, ridgeSolve(Atr, btr, d, r), target, tr1, va1);
+      if (s < bestScore) { bestScore = s; best = r; }
+    }
+    const w = ridgeSolve(gram(F, d, tr0, va1), project(F, d, target, tr0, va1), d, best);
+    const pred = new Float64Array(u.length);
+    for (let k = 0; k < u.length; k++) pred[k] = predict(F, d, w, k);
+    return { w, d, F, pred, ridge: best, testNmse: nmse(F, d, w, target, va1, te1), valNmse: bestScore };
+  }
+
+  // Memory and nonlinearity tests (notebook Section 3.3): recover u(k-j) and the product of
+  // mean-removed inputs u(k)u(k-j) from the recordings alone. Returns R² on validation.
+  function memoryCurves(states, N, u, maxLag) {
+    const { F, d } = buildFeatures(states, N, u, false);
+    const tr0 = SPLIT.washout, tr1 = tr0 + SPLIT.train, va1 = tr1 + SPLIT.val;
+    const A = gram(F, d, tr0, tr1);
+    let um = 0;
+    for (let k = tr0; k < tr1; k++) um += u[k];
+    um /= SPLIT.train;
+    const memory = [], product = [];
+    const t = new Float64Array(u.length);
+    for (let lag = 0; lag <= maxLag; lag++) {
+      for (let k = 0; k < u.length; k++) t[k] = k - lag >= 0 ? u[k - lag] : 0;
+      memory.push(1 - nmse(F, d, ridgeSolve(A, project(F, d, t, tr0, tr1), d, 1e-6), t, tr1, va1));
+      if (lag >= 1) {
+        for (let k = 0; k < u.length; k++) t[k] = k - lag >= 0 ? (u[k] - um) * (u[k - lag] - um) : 0;
+        product.push(1 - nmse(F, d, ridgeSolve(A, project(F, d, t, tr0, tr1), d, 1e-6), t, tr1, va1));
+      }
+    }
+    return { memory, product };
+  }
+
+  return { BETA, SPLIT, K, narma10, makeMask, simulate, trainReadout, memoryCurves, solverStep };
+})();
+if (typeof module !== "undefined") module.exports = Core;
+
+</script>
+<script>
+(() => {
+  const CONFIGS = {
+    on: { pBias: 1.1, gamma: 0.05, theta: 0.2, eta: 0.3, loop: true, tauC: 0.01 },
+    off: { pBias: 0.8, gamma: 2, theta: 0.005, eta: 0, loop: false, tauC: 0.01 },
+  };
+  const N = 100, STEP_MS = 1100, HISTORY = 12;
+  const $ = (id) => document.getElementById(id);
+  const data = Core.narma10(Core.K, 42);
+  const TEST0 = Core.SPLIT.washout + Core.SPLIT.train + Core.SPLIT.val;
+  const models = {};
+  let mode = "on", k = TEST0 + 30, phase = 0, playing = false, lastT = null;
+
+  function build(cfg) {
+    const sim = Core.simulate(cfg, data.u, Core.makeMask(N, 1));
+    const fit = Core.trainReadout(sim.states, N, data.u, data.d);
+    const curves = Core.memoryCurves(sim.states, N, data.u, HISTORY - 1);
+    // Glow scale: output range over the test set
+    const per = N * sim.S, tr = sim.traceL.subarray((TEST0 - 1) * per);
+    let lo = Infinity, hi = -Infinity;
+    for (const v of tr) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return { sim, fit, curves, lo, hi };
+  }
+
+  const hue = (i) => (i * 137.5) % 360;
+  const color = (i, a = 1) => `hsla(${hue(i)}, 85%, 62%, ${a})`;
+
+  // ---- layout in scene units (1000 × 470) ----
+  const L = {
+    conveyorY: 170, pumpX0: 270, pumpX1: 430,
+    rod: { x: 470, y: 146, w: 190, h: 48 },
+    loop: { x0: 700, x1: 930, top: 170, bottom: 300, back: 350 },
+    stripY: 400,
+  };
+  function loopPath() {
+    // from the right end of the rod, out to the right, down, back left under the scene, up into the pump
+    const r = L.rod, lp = L.loop, y = r.y + r.h / 2;
+    return [[r.x + r.w, y], [lp.x1, y], [lp.x1, lp.bottom], [lp.back, lp.bottom], [lp.back, y + 18], [L.pumpX1 - 10, y + 18]];
+  }
+  function along(path, f) {
+    const seg = [];
+    let total = 0;
+    for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]); seg.push(d); total += d; }
+    let t = f * total;
+    for (let i = 0; i < seg.length; i++) {
+      if (t <= seg[i]) { const a = t / seg[i]; return [path[i][0] + (path[i + 1][0] - path[i][0]) * a, path[i][1] + (path[i + 1][1] - path[i][1]) * a]; }
+      t -= seg[i];
+    }
+    return path[path.length - 1];
+  }
+
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function drawScene() {
+    const c = $("scene"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const g = c.getContext("2d"), s = W / 1000;
+    g.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
+    g.clearRect(0, 0, 1000, 470);
+    const m = models[mode], ink = css("--ink"), muted = css("--muted"), line = css("--line");
+    const font = (px, w = 600) => `${w} ${px}px ${css("--font-body")}`;
+    g.textAlign = "center"; g.textBaseline = "middle";
+
+    // ---- inputs on the conveyor ----
+    g.fillStyle = muted; g.font = font(15); g.fillText("inputs", 120, 80);
+    g.strokeStyle = line; g.lineWidth = 2; g.beginPath(); g.moveTo(20, L.conveyorY); g.lineTo(L.pumpX0, L.conveyorY); g.stroke();
+    const spacing = 62;
+    for (let i = 4; i >= 0; i--) {
+      const idx = k + i, u = data.u[idx];
+      let x = L.pumpX0 - 30 - i * spacing + phase * spacing;
+      let a = 1;
+      if (i === 0) { x = L.pumpX0 - 30 + Math.min(phase / 0.35, 1) * 90; a = 1 - Math.min(phase / 0.35, 1); }
+      if (x < 25) continue;
+      const r = 7 + 34 * u;
+      g.fillStyle = color(idx, a); g.beginPath(); g.arc(x, L.conveyorY, r, 0, 7); g.fill();
+      if (a > 0.5) { g.fillStyle = "#0c0f0e"; g.font = font(11, 700); g.fillText(u.toFixed(2), x, L.conveyorY); }
+    }
+    g.fillStyle = muted; g.font = font(13, 400); g.fillText("bigger dot = bigger number", 130, L.conveyorY + 52);
+
+    // ---- pump light ----
+    const pumpCol = css("--pump"), y0 = L.rod.y + L.rod.h / 2;
+    g.fillStyle = muted; g.font = font(15); g.fillText("pump light", (L.pumpX0 + L.pumpX1) / 2, 80);
+    const tint = color(k, 0.9);
+    for (let w = 0; w < 3; w++) {
+      g.strokeStyle = w === 1 ? tint : pumpCol; g.globalAlpha = w === 1 ? Math.max(0, 1 - phase * 1.2) : 0.85; g.lineWidth = 3;
+      g.beginPath();
+      for (let x = L.pumpX0; x <= L.pumpX1; x += 4) {
+        const yy = y0 - 8 + w * 8 + 5 * Math.sin((x - L.pumpX0) / 14 - phase * 12 + w);
+        x === L.pumpX0 ? g.moveTo(x, yy) : g.lineTo(x, yy);
+      }
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+
+    // ---- laser particle: glow from the simulated output during this input ----
+    const per = N * m.sim.S, sIdx = Math.min(per - 1, Math.floor(phase * per));
+    const Lnow = m.sim.traceL[k * per + sIdx];
+    const level = Math.max(0, Math.min(1, (Lnow - m.lo) / (m.hi - m.lo + 1e-12)));
+    const laserCol = css("--laser"), r = L.rod, cx = r.x + r.w / 2;
+    const glow = g.createRadialGradient(cx, y0, 10, cx, y0, 150);
+    glow.addColorStop(0, `rgba(255, 90, 78, ${0.15 + 0.6 * level})`); glow.addColorStop(1, "rgba(255, 90, 78, 0)");
+    g.fillStyle = glow; g.fillRect(cx - 160, y0 - 160, 320, 320);
+    // memory bands inside the rod: colours of recent inputs, as strong as the laser still holds them
+    g.save(); g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 22); g.clip();
+    g.fillStyle = "#2a1513"; g.fillRect(r.x, r.y, r.w, r.h);
+    const mem = m.curves.memory;
+    let xb = r.x + r.w;
+    for (let j = 0; j < HISTORY; j++) {
+      const strength = Math.max(0, mem[j]), w = (r.w / HISTORY);
+      xb -= w;
+      g.fillStyle = color(k - j, 0.15 + 0.85 * strength * strength); g.fillRect(xb, r.y, w + 0.5, r.h);
+    }
+    g.restore();
+    g.strokeStyle = laserCol; g.lineWidth = 2 + 4 * level; g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 22); g.stroke();
+    g.fillStyle = ink; g.font = font(15); g.fillText("laser particle", cx, 80);
+    g.fillStyle = muted; g.font = font(13, 400); g.fillText("glow = laser output, recorded 100× per input", cx, 108);
+
+    // ---- delay loop ----
+    const path = loopPath(), loopOn = mode === "on", loopCol = css("--loop");
+    g.strokeStyle = loopOn ? loopCol : line; g.lineWidth = loopOn ? 3 : 2; g.setLineDash(loopOn ? [] : [6, 6]);
+    g.beginPath(); path.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.setLineDash([]);
+    // arrow head into the pump
+    const [ax, ay] = path[path.length - 1];
+    g.fillStyle = loopOn ? loopCol : line; g.beginPath(); g.moveTo(ax - 2, ay); g.lineTo(ax + 12, ay - 7); g.lineTo(ax + 12, ay + 7); g.fill();
+    g.fillStyle = loopOn ? loopCol : muted; g.font = font(15);
+    g.fillText(loopOn ? "delay loop: part of the glow is fed back into the pump" : "no delay loop", (L.loop.back + L.loop.x1) / 2, L.loop.bottom + 24);
+    if (loopOn) {
+      // the light packet from the previous input travels around during this input
+      const [px, py] = along(path, phase);
+      g.fillStyle = color(k - 1, 0.95); g.beginPath(); g.arc(px, py, 9, 0, 7); g.fill();
+      g.strokeStyle = loopCol; g.lineWidth = 2; g.stroke();
+    }
+
+    // ---- memory strip ----
+    g.textAlign = "left"; g.fillStyle = ink; g.font = font(15);
+    g.fillText("What the laser still holds", 40, L.stripY - 44);
+    const x0 = 40, dx = 72;
+    for (let j = 0; j < HISTORY; j++) {
+      const x = x0 + (HISTORY - 1 - j) * dx + 18, strength = Math.max(0, mem[j]);
+      g.strokeStyle = line; g.lineWidth = 1.5; g.beginPath(); g.arc(x, L.stripY, 15, 0, 7); g.stroke();
+      g.fillStyle = color(k - j, Math.max(0.04, strength * strength)); g.beginPath(); g.arc(x, L.stripY, 15, 0, 7); g.fill();
+      g.textAlign = "center"; g.fillStyle = muted; g.font = font(12, 400);
+      g.fillText(j === 0 ? "now" : `${j} ago`, x, L.stripY + 28);
+    }
+    // NARMA10 marker at 9 steps ago
+    const x9 = x0 + (HISTORY - 1 - 9) * dx + 18;
+    g.strokeStyle = ink; g.globalAlpha = 0.6; g.setLineDash([3, 4]);
+    g.beginPath(); g.moveTo(x9 - 26, L.stripY - 26); g.lineTo(x9 - 26, L.stripY + 40); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    g.textAlign = "left"; g.fillStyle = muted; g.font = font(12, 400);
+    g.fillText("↑ NARMA10 needs inputs back to here", x9 - 30, L.stripY + 52);
+  }
+
+  function drawPred() {
+    const c = $("pred"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const g = c.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    const m = models[mode], n = 50, k0 = k - n + 1, lo = 0.1, hi = 0.8;
+    const X = (i) => 12 + ((W - 24) * i) / (n - 1), Y = (v) => 10 + (H - 20) * (1 - (v - lo) / (hi - lo));
+    for (const [arr, col, w] of [[data.d, css("--ink"), 2], [m.fit.pred, css("--laser"), 2]]) {
+      g.strokeStyle = col; g.lineWidth = w; g.beginPath();
+      for (let i = 0; i < n; i++) { const x = X(i), y = Y(arr[k0 + i]); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+      g.stroke(); g.fillStyle = col; g.beginPath(); g.arc(X(n - 1), Y(arr[k]), 4, 0, 7); g.fill();
+    }
+  }
+
+  function verdict() {
+    const m = models[mode], mem = m.curves.memory;
+    let held = 0;
+    while (held < mem.length && mem[held] > 0.5) held++;
+    const steps = held >= HISTORY ? `${HISTORY - 1}+` : String(Math.max(0, held - 1));
+    $("verdict").innerHTML = mode === "on"
+      ? `Loop on: the laser still holds inputs from <b>${steps}</b> steps ago. Prediction score <b>${m.fit.testNmse.toFixed(2)}</b>.`
+      : `Loop off: the laser holds inputs from only <b>${steps}</b> steps ago. Prediction score <b>${m.fit.testNmse.toFixed(2)}</b>.`;
+  }
+
+  function draw() { drawScene(); drawPred(); }
+
+  function next() {
+    k = k + 1 >= Core.K ? TEST0 + 30 : k + 1;
+  }
+  function frame(t) {
+    if (playing) {
+      if (lastT !== null) phase += (t - lastT) / STEP_MS;
+      while (phase >= 1) { phase -= 1; next(); }
+    }
+    lastT = t;
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function setMode(m) {
+    mode = m;
+    $("on").setAttribute("aria-pressed", m === "on"); $("off").setAttribute("aria-pressed", m === "off");
+    verdict(); draw();
+  }
+  $("on").addEventListener("click", () => setMode("on"));
+  $("off").addEventListener("click", () => setMode("off"));
+  $("play").addEventListener("click", () => { playing = !playing; $("play").textContent = playing ? "❚❚ Pause" : "▶ Play"; });
+  $("step").addEventListener("click", () => { playing = false; $("play").textContent = "▶ Play"; phase = 0; next(); draw(); });
+
+  models.on = build(CONFIGS.on);
+  models.off = build(CONFIGS.off);
+  phase = 0.45;
+  setMode("on");
+  new ResizeObserver(draw).observe($("scene"));
+  requestAnimationFrame(frame);
+})();
+</script>
