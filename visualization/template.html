@@ -3,75 +3,95 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Laser Reservoir</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap">
 <style>
-/* One scene, read left to right: inputs → pump → laser particle → delay loop back to the pump. Dark lab bench so the laser glow reads. */
+/* One frame, read left to right: input → reservoir (pump, laser, recordings, loop) → trained weights → sum → prediction.
+   Orange = the fixed physical part (light). Blue = the trained part and its output. */
 :root {
-  --bg: #0c0f0e;
-  --panel: #131816;
-  --ink: #e8ece9;
-  --muted: #8e9a94;
-  --line: #26302c;
-  --pump: #4fd16a;
-  --laser: #ff5a4e;
-  --loop: #f2a33a;
-  --font-display: "Archivo Narrow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
-  --font-body: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
-  color-scheme: dark;
+  --bg: #f6f6f3;
+  --card: #ffffff;
+  --ink: #1c1c1e;
+  --muted: #6c6c72;
+  --line: #d9d9dd;
+  --grid: #ececef;
+  --laser: #e8590c;
+  --res-bg: #fff6ee;
+  --res-line: #f1d3bb;
+  --train: #2463eb;
+  --read-bg: #f2f6ff;
+  --read-line: #cddaf6;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.45;
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
-  padding-block: 24px 40px;
-}
-.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-h1 { font-family: var(--font-display); font-size: 2.2rem; font-weight: 700; margin: 0; }
-p { margin: 0; max-width: 70ch; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--font); padding: 28px 16px 48px; }
+.wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-size: 1.75rem; margin: 0; letter-spacing: -0.01em; }
+p { margin: 0; }
 .muted { color: var(--muted); }
-.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--panel); }
-.seg button { font: 600 1rem var(--font-body); border: 0; background: transparent; color: var(--muted); padding: 8px 18px; border-radius: 999px; cursor: pointer; }
-.seg button[aria-pressed="true"] { background: var(--loop); color: #1a1205; }
-.seg button.off[aria-pressed="true"] { background: var(--muted); color: var(--bg); }
-.play { font: 600 1rem var(--font-body); border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 18px; border-radius: 999px; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--laser); outline-offset: 2px; }
-.stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
-canvas { width: 100%; display: block; }
-#scene { height: auto; aspect-ratio: 1000 / 470; }
-#pred { height: 150px; }
-.verdict { font-size: 1.1rem; }
-.verdict b { font-family: var(--font-display); font-size: 1.5rem; }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.9rem; color: var(--muted); }
-.legend i { display: inline-block; width: 16px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
-.note { font-size: 0.88rem; color: var(--muted); }
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--card); }
+.seg button { font: 600 0.95rem var(--font); border: 0; background: transparent; color: var(--muted); padding: 7px 16px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--laser); color: #fff; }
+.seg button#off[aria-pressed="true"] { background: #55555b; }
+.btn { font: 600 0.95rem var(--font); border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--train); outline-offset: 2px; }
+.score { margin-left: auto; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.score .big { font-size: 1.9rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.score .big span { font-size: 1rem; font-weight: 600; color: var(--muted); margin-right: 8px; }
+.score .ref { font-size: 0.85rem; color: var(--muted); line-height: 1.3; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.card h2 { font-size: 0.95rem; margin: 0 0 4px; }
+svg { display: block; width: 100%; height: auto; font-family: var(--font); }
+.scroll { overflow-x: auto; }
+.scroll svg { min-width: 900px; }
+ol.read { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 24px; font-size: 0.92rem; }
+ol.read li { display: flex; gap: 10px; align-items: flex-start; }
+ol.read b.n { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 0.72rem; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+.note { font-size: 0.85rem; color: var(--muted); max-width: 95ch; }
+#status { font-size: 0.9rem; color: var(--muted); }
 </style>
 
 <div class="wrap">
-  <h1>Laser Reservoir</h1>
-  <p class="muted">Each input number changes the pump light hitting a tiny laser. The laser's glow is recorded and used to predict the NARMA10 answer, which depends on inputs from up to 9 steps ago. So the laser has to keep a trace of old inputs. Each input has its own colour, so you can see how long it lingers.</p>
-
-  <div class="bar">
-    <div class="seg" role="group" aria-label="Delay loop">
-      <button id="on" aria-pressed="true">Delay loop on</button>
-      <button id="off" class="off" aria-pressed="false">Delay loop off</button>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="play" id="play">▶ Play</button>
-      <button class="play" id="step">Step</button>
+  <div class="top">
+    <div>
+      <h1>Laser particle as a reservoir</h1>
+      <p class="muted">Task: predict the next NARMA10 value from the inputs so far. Only the readout weights are trained.</p>
     </div>
   </div>
 
-  <div class="stage"><canvas id="scene" aria-label="Animated laser reservoir"></canvas></div>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Delay loop">
+      <button id="on" aria-pressed="true">Delay loop on</button>
+      <button id="off" aria-pressed="false">Delay loop off</button>
+    </div>
+    <button class="btn" id="prev" aria-label="Previous step">←</button>
+    <button class="btn" id="play">▶ Play</button>
+    <button class="btn" id="next" aria-label="Next step">→</button>
+    <span id="status">Computing…</span>
+    <div class="score">
+      <div class="big" id="score"><span>Error (NMSE)</span>…</div>
+      <div class="ref">0 = perfect, 1 = no better than guessing the average.<br>Software reservoir (ESN): 0.07</div>
+    </div>
+  </div>
 
-  <p class="verdict" id="verdict"></p>
+  <div class="card scroll"><svg id="flow" viewBox="0 40 1320 340" role="img" aria-label="Pipeline for one input step"></svg></div>
 
-  <div class="stage"><canvas id="pred" aria-label="Prediction against the true answer"></canvas></div>
-  <div class="legend"><span><i style="background:var(--ink)"></i>true answer</span><span><i style="background:var(--laser)"></i>prediction from the laser</span></div>
-  <p class="note">Live simulation of the notebook's model (rate equations from Cho et al. 2016, 100 recordings per input). "Loop off" uses the best settings found without a loop. Score is test NMSE: 0 is perfect, lower is better. For comparison, the software reservoir (ESN) scores 0.067.</p>
+  <ol class="read">
+    <li><b class="n">1</b><span><b>Input.</b> One new number each step.</span></li>
+    <li><b class="n">2</b><span><b>Pump.</b> The input, times a fixed random pattern, sets the pump in each of 100 time slots. With the loop on, the delayed light is added too.</span></li>
+    <li><b class="n">3</b><span><b>Laser.</b> Its light output follows the pump, with a lag.</span></li>
+    <li><b class="n">4</b><span><b>Recordings.</b> The light is measured at the end of each slot: 100 numbers per step.</span></li>
+    <li><b class="n">5</b><span><b>Weights.</b> Each recording is multiplied by its own weight. These weights are the only trained part.</span></li>
+    <li><b class="n">6</b><span><b>Sum.</b> The 100 products are added (plus a term for the input and a constant).</span></li>
+    <li><b class="n">7</b><span><b>Prediction.</b> The sum is the guess for the next NARMA10 value.</span></li>
+  </ol>
+
+  <div class="card">
+    <h2>Prediction vs truth on data the readout never saw <span class="muted" style="font-weight:400">(click to pick a step)</span></h2>
+    <svg id="chart" viewBox="0 0 1320 274" role="img" aria-label="Prediction against truth"></svg>
+  </div>
+
+  <p class="note">Live simulation of the notebook's model (Cho et al. 2016 rate equations, 100 slots per input). "Loop off" uses the best settings found without a loop. The page uses less data than the notebook, so its scores differ a little (notebook: 0.115 with the loop, 0.648 without). Keys: ← → change the step, space plays.</p>
 </div>
 
 <script>
@@ -79,210 +99,282 @@ canvas { width: 100%; display: block; }
 </script>
 <script>
 (() => {
-  const CONFIGS = {
+  const N = 100;
+  const CFG = {
     on: { pBias: 1.1, gamma: 0.05, theta: 0.2, eta: 0.3, loop: true, tauC: 0.01 },
     off: { pBias: 0.8, gamma: 2, theta: 0.005, eta: 0, loop: false, tauC: 0.01 },
   };
-  const N = 100, STEP_MS = 1100, HISTORY = 12;
-  const $ = (id) => document.getElementById(id);
+  const T0 = Core.SPLIT.washout + Core.SPLIT.train + Core.SPLIT.val;   // first test step
+  const WIN = 150;                                                       // test steps shown
   const data = Core.narma10(Core.K, 42);
-  const TEST0 = Core.SPLIT.washout + Core.SPLIT.train + Core.SPLIT.val;
-  const models = {};
-  let mode = "on", k = TEST0 + 30, phase = 0, playing = false, lastT = null;
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+  const fmt = (x) => x.toFixed(2);
 
+  // ---------- model ----------
   function build(cfg) {
     const sim = Core.simulate(cfg, data.u, Core.makeMask(N, 1));
-    const fit = Core.trainReadout(sim.states, N, data.u, data.d);
-    const curves = Core.memoryCurves(sim.states, N, data.u, HISTORY - 1);
-    // Glow scale: output range over the test set
-    const per = N * sim.S, tr = sim.traceL.subarray((TEST0 - 1) * per);
-    let lo = Infinity, hi = -Infinity;
-    for (const v of tr) { if (v < lo) lo = v; if (v > hi) hi = v; }
-    return { sim, fit, curves, lo, hi };
+    const r = Core.trainReadout(sim.states, N, data.u, data.d);
+    const per = N * sim.S;
+    let pMin = Infinity, pMax = -Infinity, gMin = Infinity, gMax = -Infinity, wMax = 0;
+    const glow = new Float64Array(data.u.length);
+    for (let k = T0; k < T0 + WIN; k++) {
+      for (let t = k * per; t < (k + 1) * per; t++) { pMin = Math.min(pMin, sim.traceP[t]); pMax = Math.max(pMax, sim.traceP[t]); }
+      let s = 0;
+      for (let i = 0; i < N; i++) s += sim.states[k * N + i];
+      glow[k] = s / N;
+      gMin = Math.min(gMin, glow[k]); gMax = Math.max(gMax, glow[k]);
+    }
+    for (let i = 0; i < N; i++) wMax = Math.max(wMax, Math.abs(r.w[i]));
+    // bar scale for the recordings: 98th percentile of their size in the steps shown (rare larger ones are clipped)
+    const sizes = [];
+    for (let k = T0; k < T0 + WIN; k++) for (let i = 0; i < N; i++) sizes.push(Math.abs(r.F[k * r.d + i]));
+    sizes.sort((a, b) => a - b);
+    const rMax = sizes[Math.floor(0.98 * (sizes.length - 1))];
+    const pad = 0.08 * (pMax - pMin || 1);
+    return { sim, r, per, pMin: pMin - pad, pMax: pMax + pad, gMin, gMax, wMax, rMax, glow };
   }
 
-  const hue = (i) => (i * 137.5) % 360;
-  const color = (i, a = 1) => `hsla(${hue(i)}, 85%, 62%, ${a})`;
-
-  // ---- layout in scene units (1000 × 470) ----
-  const L = {
-    conveyorY: 170, pumpX0: 270, pumpX1: 430,
-    rod: { x: 470, y: 146, w: 190, h: 48 },
-    loop: { x0: 700, x1: 930, top: 170, bottom: 300, back: 350 },
-    stripY: 400,
+  // ---------- static diagram ----------
+  const flow = document.getElementById("flow");
+  const defs = el("defs", {}, flow);
+  const arrowHead = (id, color) => {
+    const m = el("marker", { id, viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+    el("path", { d: "M0,0 L10,5 L0,10 z", fill: color }, m);
   };
-  function loopPath() {
-    // from the right end of the rod, out to the right, down, back left under the scene, up into the pump
-    const r = L.rod, lp = L.loop, y = r.y + r.h / 2;
-    return [[r.x + r.w, y], [lp.x1, y], [lp.x1, lp.bottom], [lp.back, lp.bottom], [lp.back, y + 18], [L.pumpX1 - 10, y + 18]];
+  arrowHead("ah-ink", "#8a8a90");
+  arrowHead("ah-laser", css("--laser"));
+  arrowHead("ah-off", "#b9b9be");
+  const blur = el("filter", { id: "glow", x: "-100%", y: "-100%", width: "300%", height: "300%" }, defs);
+  el("feGaussianBlur", { stdDeviation: 9 }, blur);
+
+  const Y = { label: 122, cap: 142, top: 156, mid: 204, bot: 252, h: 96 };
+  const X = { inp: 24, inpW: 104, res: 166, resW: 600, pump: 190, rec: 546, laser: 470, read: 802, readW: 318, wts: 822, sum: 1068, out: 1152, outW: 150, strip: 200 };
+
+  function text(x, y, s, attrs = {}, parent = flow) {
+    const t = el("text", Object.assign({ x, y, fill: css("--ink"), "font-size": 15, "dominant-baseline": "central" }, attrs), parent);
+    t.textContent = s;
+    return t;
   }
-  function along(path, f) {
-    const seg = [];
-    let total = 0;
-    for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]); seg.push(d); total += d; }
-    let t = f * total;
-    for (let i = 0; i < seg.length; i++) {
-      if (t <= seg[i]) { const a = t / seg[i]; return [path[i][0] + (path[i + 1][0] - path[i][0]) * a, path[i][1] + (path[i + 1][1] - path[i][1]) * a]; }
-      t -= seg[i];
-    }
-    return path[path.length - 1];
+  // A numbered label: black badge, then bold text. anchor "start" puts the badge at x; "middle" centres badge + text on x.
+  function label(x, y, n, s, anchor = "start") {
+    const g = el("g", {}, flow);
+    el("circle", { cx: 10, cy: 0, r: 10, fill: css("--ink") }, g);
+    text(10, 0.5, String(n), { fill: "#fff", "font-size": 11.5, "font-weight": 700, "text-anchor": "middle" }, g);
+    const t = text(28, 0, s, { "font-weight": 650 }, g);
+    const w = 28 + t.getComputedTextLength();
+    g.setAttribute("transform", `translate(${anchor === "middle" ? x - w / 2 : x},${y})`);
+  }
+  const caption = (x, y, s, anchor = "start") => text(x, y, s, { fill: css("--muted"), "font-size": 13, "text-anchor": anchor });
+  const arrow = (x1, y1, x2, y2, id = "ah-ink", color = "#8a8a90") =>
+    el("line", { x1, y1, x2, y2, stroke: color, "stroke-width": 2, "marker-end": `url(#${id})` }, flow);
+
+  // section boxes
+  el("rect", { x: X.res, y: 52, width: X.resW, height: 316, rx: 14, fill: css("--res-bg"), stroke: css("--res-line"), "stroke-width": 1.5 }, flow);
+  text(X.res + 18, 78, "RESERVOIR", { "font-size": 13, "font-weight": 750, "letter-spacing": "0.08em", fill: css("--laser") });
+  text(X.res + 112, 78, "physical, fixed, not trained", { "font-size": 13, fill: css("--muted") });
+  el("rect", { x: X.read, y: 52, width: X.readW, height: 316, rx: 14, fill: css("--read-bg"), stroke: css("--read-line"), "stroke-width": 1.5 }, flow);
+  text(X.read + 18, 78, "READOUT", { "font-size": 13, "font-weight": 750, "letter-spacing": "0.08em", fill: css("--train") });
+  text(X.read + 102, 78, "the only trained part", { "font-size": 13, fill: css("--muted") });
+
+  // 1 input
+  label(X.inp, Y.label, 1, "Input");
+  caption(X.inp, Y.cap, "new each step");
+  el("rect", { x: X.inp, y: Y.top, width: X.inpW, height: Y.h, rx: 10, fill: "#fff", stroke: css("--line"), "stroke-width": 1.5 }, flow);
+  const inpVal = text(X.inp + X.inpW / 2, Y.mid, "", { "font-size": 28, "font-weight": 700, "text-anchor": "middle" });
+  arrow(X.inp + X.inpW + 4, Y.mid, X.pump - 6, Y.mid);
+
+  // strip frame (white panel with a centre line)
+  function strip(x) {
+    el("rect", { x, y: Y.top, width: X.strip, height: Y.h, rx: 8, fill: "#fff", stroke: css("--line"), "stroke-width": 1.5 }, flow);
+    el("line", { x1: x + 6, x2: x + X.strip - 6, y1: Y.mid, y2: Y.mid, stroke: css("--grid"), "stroke-width": 1 }, flow);
+    return el("g", {}, flow);
   }
 
-  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  // 2 pump
+  label(X.pump, Y.label, 2, "Pump brightness");
+  caption(X.pump, Y.cap, "100 slots in one step");
+  const pumpG = strip(X.pump);
+  const pumpLine = el("polyline", { fill: "none", stroke: css("--ink"), "stroke-width": 1.6, "stroke-linejoin": "round" }, pumpG);
+  arrow(X.pump + X.strip + 6, Y.mid, X.laser - 40, Y.mid);
 
-  function drawScene() {
-    const c = $("scene"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
-    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
-    const g = c.getContext("2d"), s = W / 1000;
-    g.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
-    g.clearRect(0, 0, 1000, 470);
-    const m = models[mode], ink = css("--ink"), muted = css("--muted"), line = css("--line");
-    const font = (px, w = 600) => `${w} ${px}px ${css("--font-body")}`;
-    g.textAlign = "center"; g.textBaseline = "middle";
+  // 3 laser
+  label(X.laser, Y.label, 3, "Laser particle", "middle");
+  caption(X.laser, Y.cap, "follows the pump", "middle");
+  const halo = el("circle", { cx: X.laser, cy: Y.mid, r: 30, fill: css("--laser"), filter: "url(#glow)" }, flow);
+  el("circle", { cx: X.laser, cy: Y.mid, r: 26, fill: "#fff", stroke: css("--laser"), "stroke-width": 2 }, flow);
+  const core = el("circle", { cx: X.laser, cy: Y.mid, r: 17, fill: css("--laser") }, flow);
+  arrow(X.laser + 32, Y.mid, X.rec - 6, Y.mid, "ah-laser", css("--laser"));
 
-    // ---- inputs on the conveyor ----
-    g.fillStyle = muted; g.font = font(15); g.fillText("inputs", 120, 80);
-    g.strokeStyle = line; g.lineWidth = 2; g.beginPath(); g.moveTo(20, L.conveyorY); g.lineTo(L.pumpX0, L.conveyorY); g.stroke();
-    const spacing = 62;
-    for (let i = 4; i >= 0; i--) {
-      const idx = k + i, u = data.u[idx];
-      let x = L.pumpX0 - 30 - i * spacing + phase * spacing;
-      let a = 1;
-      if (i === 0) { x = L.pumpX0 - 30 + Math.min(phase / 0.35, 1) * 90; a = 1 - Math.min(phase / 0.35, 1); }
-      if (x < 25) continue;
-      const r = 7 + 34 * u;
-      g.fillStyle = color(idx, a); g.beginPath(); g.arc(x, L.conveyorY, r, 0, 7); g.fill();
-      if (a > 0.5) { g.fillStyle = "#0c0f0e"; g.font = font(11, 700); g.fillText(u.toFixed(2), x, L.conveyorY); }
+  // 4 recordings
+  label(X.rec, Y.label, 4, "100 recordings");
+  caption(X.rec, Y.cap, "light measured once per slot");
+  const recG = strip(X.rec);
+
+  // delay loop: from the laser output back to the bottom of the pump strip
+  const jx = X.laser + 58, loopY = 318, px = X.pump + X.strip / 2;
+  const loopPath = el("path", { d: `M${jx},${Y.mid} V${loopY} H${px} V${Y.bot + 8}`, fill: "none", "stroke-width": 2.5, "stroke-linejoin": "round" }, flow);
+  const loopDot = el("circle", { cx: jx, cy: Y.mid, r: 4.5 }, flow);
+  const loopText = text((jx + px) / 2, loopY + 24, "", { "font-size": 14, "text-anchor": "middle" });
+
+  arrow(X.rec + X.strip + 6, Y.mid, X.wts - 6, Y.mid);
+
+  // 5 weights
+  label(X.wts, Y.label, 5, "× 100 weights");
+  caption(X.wts, Y.cap, "one per recording, set by training");
+  const wG = strip(X.wts);
+  arrow(X.wts + X.strip + 6, Y.mid, X.sum - 28, Y.mid);
+
+  // 6 sum
+  label(X.sum, Y.label, 6, "Sum", "middle");
+  el("circle", { cx: X.sum, cy: Y.mid, r: 22, fill: "#fff", stroke: css("--train"), "stroke-width": 2 }, flow);
+  text(X.sum, Y.mid + 1, "Σ", { "font-size": 22, "font-weight": 600, "text-anchor": "middle", fill: css("--train") });
+  arrow(X.sum + 24, Y.mid, X.out - 6, Y.mid, "ah-ink");
+
+  // 7 prediction
+  label(X.out, Y.label, 7, "Prediction");
+  caption(X.out, Y.cap, "next NARMA10 value");
+  el("rect", { x: X.out, y: Y.top, width: X.outW, height: Y.h, rx: 10, fill: "#fff", stroke: css("--train"), "stroke-width": 1.5 }, flow);
+  const predVal = text(X.out + X.outW / 2, Y.mid - 12, "", { "font-size": 28, "font-weight": 700, "text-anchor": "middle", fill: css("--train") });
+  const truthVal = text(X.out + X.outW / 2, Y.mid + 24, "", { "font-size": 14, "text-anchor": "middle", fill: css("--muted") });
+
+  // ---------- chart ----------
+  const chart = document.getElementById("chart");
+  const C = { l: 56, r: 1304, t: 14, b: 214 };
+  const truthLine = el("polyline", { fill: "none", stroke: css("--ink"), "stroke-width": 1.8, "stroke-linejoin": "round" }, null);
+  const predLine = el("polyline", { fill: "none", stroke: css("--train"), "stroke-width": 1.8, "stroke-linejoin": "round" }, null);
+  let yMin, yMax;
+  {
+    let lo = Infinity, hi = -Infinity;
+    for (let k = T0; k < T0 + WIN; k++) { lo = Math.min(lo, data.d[k]); hi = Math.max(hi, data.d[k]); }
+    const pad = 0.15 * (hi - lo);
+    yMin = Math.floor((lo - pad) * 10) / 10; yMax = Math.ceil((hi + pad) * 10) / 10;
+  }
+  const cx = (k) => C.l + ((k - T0) / (WIN - 1)) * (C.r - C.l);
+  const cy = (v) => C.b - ((Math.min(Math.max(v, yMin), yMax) - yMin) / (yMax - yMin)) * (C.b - C.t);
+  for (let v = yMin; v <= yMax + 1e-9; v += 0.1) {
+    el("line", { x1: C.l, x2: C.r, y1: cy(v), y2: cy(v), stroke: css("--grid") }, chart);
+    text(C.l - 10, cy(v), v.toFixed(1), { "font-size": 13, fill: css("--muted"), "text-anchor": "end" }, chart);
+  }
+  for (let s = 0; s < WIN; s += 25) text(cx(T0 + s), C.b + 18, `step ${s}`, { "font-size": 13, fill: css("--muted"), "text-anchor": "middle" }, chart);
+  chart.appendChild(truthLine); chart.appendChild(predLine);
+  const marker = el("line", { y1: C.t, y2: C.b, stroke: "#9a9aa0", "stroke-width": 1, "stroke-dasharray": "3 3" }, chart);
+  const dotT = el("circle", { r: 4.5, fill: css("--ink") }, chart);
+  const dotP = el("circle", { r: 4.5, fill: css("--train") }, chart);
+  // legend
+  const lg = el("g", { transform: `translate(${C.l},${C.b + 44})` }, chart);
+  el("line", { x1: 0, x2: 22, y1: 0, y2: 0, stroke: css("--ink"), "stroke-width": 2.5 }, lg);
+  text(30, 0, "truth", { "font-size": 13 }, lg);
+  el("line", { x1: 90, x2: 112, y1: 0, y2: 0, stroke: css("--train"), "stroke-width": 2.5 }, lg);
+  text(120, 0, "prediction from the laser reservoir", { "font-size": 13 }, lg);
+
+  // ---------- state + render ----------
+  const models = {};
+  let mode = "on", k = T0 + 20, timer = null;
+
+  function render() {
+    const m = models[mode];
+    if (!m) return;
+    const { sim, r } = m;
+    const loopOn = mode === "on";
+
+    inpVal.textContent = fmt(data.u[k]);
+
+    // pump trace for this step
+    const pts = [];
+    const x0 = X.pump + 8, w = X.strip - 16;
+    for (let t = 0; t < m.per; t++) {
+      const v = sim.traceP[k * m.per + t];
+      pts.push(`${(x0 + (t / (m.per - 1)) * w).toFixed(1)},${(Y.bot - 8 - ((v - m.pMin) / (m.pMax - m.pMin)) * (Y.h - 16)).toFixed(1)}`);
     }
-    g.fillStyle = muted; g.font = font(13, 400); g.fillText("bigger dot = bigger number", 130, L.conveyorY + 52);
+    pumpLine.setAttribute("points", pts.join(" "));
 
-    // ---- pump light ----
-    const pumpCol = css("--pump"), y0 = L.rod.y + L.rod.h / 2;
-    g.fillStyle = muted; g.font = font(15); g.fillText("pump light", (L.pumpX0 + L.pumpX1) / 2, 80);
-    const tint = color(k, 0.9);
-    for (let w = 0; w < 3; w++) {
-      g.strokeStyle = w === 1 ? tint : pumpCol; g.globalAlpha = w === 1 ? Math.max(0, 1 - phase * 1.2) : 0.85; g.lineWidth = 3;
-      g.beginPath();
-      for (let x = L.pumpX0; x <= L.pumpX1; x += 4) {
-        const yy = y0 - 8 + w * 8 + 5 * Math.sin((x - L.pumpX0) / 14 - phase * 12 + w);
-        x === L.pumpX0 ? g.moveTo(x, yy) : g.lineTo(x, yy);
+    // laser glow: brightness of this step relative to the steps shown
+    const g = (m.glow[k] - m.gMin) / (m.gMax - m.gMin || 1);
+    halo.setAttribute("opacity", (0.15 + 0.6 * g).toFixed(2));
+    core.setAttribute("opacity", (0.35 + 0.65 * g).toFixed(2));
+
+    // recordings and weights as bars around the centre line
+    const bars = (group, values, scale, color) => {
+      group.replaceChildren();
+      const bw = (X.strip - 16) / N;
+      const gx = group === recG ? X.rec : X.wts;
+      for (let i = 0; i < N; i++) {
+        const h = Math.max(-1, Math.min(1, values(i) / scale)) * (Y.h / 2 - 8);
+        el("rect", { x: (gx + 8 + i * bw + 0.15).toFixed(2), y: (h >= 0 ? Y.mid - h : Y.mid).toFixed(2), width: (bw - 0.3).toFixed(2), height: Math.max(Math.abs(h), 0.6).toFixed(2), fill: color }, group);
       }
-      g.stroke();
-    }
-    g.globalAlpha = 1;
+    };
+    bars(recG, (i) => r.F[k * r.d + i], m.rMax, css("--laser"));
+    bars(wG, (i) => r.w[i], m.wMax, css("--train"));
 
-    // ---- laser particle: glow from the simulated output during this input ----
-    const per = N * m.sim.S, sIdx = Math.min(per - 1, Math.floor(phase * per));
-    const Lnow = m.sim.traceL[k * per + sIdx];
-    const level = Math.max(0, Math.min(1, (Lnow - m.lo) / (m.hi - m.lo + 1e-12)));
-    const laserCol = css("--laser"), r = L.rod, cx = r.x + r.w / 2;
-    const glow = g.createRadialGradient(cx, y0, 10, cx, y0, 150);
-    glow.addColorStop(0, `rgba(255, 90, 78, ${0.15 + 0.6 * level})`); glow.addColorStop(1, "rgba(255, 90, 78, 0)");
-    g.fillStyle = glow; g.fillRect(cx - 160, y0 - 160, 320, 320);
-    // memory bands inside the rod: colours of recent inputs, as strong as the laser still holds them
-    g.save(); g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 22); g.clip();
-    g.fillStyle = "#2a1513"; g.fillRect(r.x, r.y, r.w, r.h);
-    const mem = m.curves.memory;
-    let xb = r.x + r.w;
-    for (let j = 0; j < HISTORY; j++) {
-      const strength = Math.max(0, mem[j]), w = (r.w / HISTORY);
-      xb -= w;
-      g.fillStyle = color(k - j, 0.15 + 0.85 * strength * strength); g.fillRect(xb, r.y, w + 0.5, r.h);
-    }
-    g.restore();
-    g.strokeStyle = laserCol; g.lineWidth = 2 + 4 * level; g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 22); g.stroke();
-    g.fillStyle = ink; g.font = font(15); g.fillText("laser particle", cx, 80);
-    g.fillStyle = muted; g.font = font(13, 400); g.fillText("glow = laser output, recorded 100× per input", cx, 108);
+    // loop
+    const lc = loopOn ? css("--laser") : "#b9b9be";
+    loopPath.setAttribute("stroke", lc);
+    loopPath.setAttribute("stroke-dasharray", loopOn ? "" : "6 6");
+    loopPath.setAttribute("marker-end", loopOn ? "url(#ah-laser)" : "url(#ah-off)");
+    loopDot.setAttribute("fill", lc);
+    loopDot.setAttribute("visibility", loopOn ? "visible" : "hidden");
+    loopText.textContent = loopOn ? "Delay loop: part of the light goes back into the pump, arriving one input step later" : "No delay loop: the pump sees only the current input";
+    loopText.setAttribute("fill", loopOn ? css("--laser") : css("--muted"));
 
-    // ---- delay loop ----
-    const path = loopPath(), loopOn = mode === "on", loopCol = css("--loop");
-    g.strokeStyle = loopOn ? loopCol : line; g.lineWidth = loopOn ? 3 : 2; g.setLineDash(loopOn ? [] : [6, 6]);
-    g.beginPath(); path.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.setLineDash([]);
-    // arrow head into the pump
-    const [ax, ay] = path[path.length - 1];
-    g.fillStyle = loopOn ? loopCol : line; g.beginPath(); g.moveTo(ax - 2, ay); g.lineTo(ax + 12, ay - 7); g.lineTo(ax + 12, ay + 7); g.fill();
-    g.fillStyle = loopOn ? loopCol : muted; g.font = font(15);
-    g.fillText(loopOn ? "delay loop: part of the glow is fed back into the pump" : "no delay loop", (L.loop.back + L.loop.x1) / 2, L.loop.bottom + 24);
-    if (loopOn) {
-      // the light packet from the previous input travels around during this input
-      const [px, py] = along(path, phase);
-      g.fillStyle = color(k - 1, 0.95); g.beginPath(); g.arc(px, py, 9, 0, 7); g.fill();
-      g.strokeStyle = loopCol; g.lineWidth = 2; g.stroke();
-    }
+    predVal.textContent = fmt(r.pred[k]);
+    truthVal.textContent = `truth ${fmt(data.d[k])}`;
 
-    // ---- memory strip ----
-    g.textAlign = "left"; g.fillStyle = ink; g.font = font(15);
-    g.fillText("What the laser still holds", 40, L.stripY - 44);
-    const x0 = 40, dx = 72;
-    for (let j = 0; j < HISTORY; j++) {
-      const x = x0 + (HISTORY - 1 - j) * dx + 18, strength = Math.max(0, mem[j]);
-      g.strokeStyle = line; g.lineWidth = 1.5; g.beginPath(); g.arc(x, L.stripY, 15, 0, 7); g.stroke();
-      g.fillStyle = color(k - j, Math.max(0.04, strength * strength)); g.beginPath(); g.arc(x, L.stripY, 15, 0, 7); g.fill();
-      g.textAlign = "center"; g.fillStyle = muted; g.font = font(12, 400);
-      g.fillText(j === 0 ? "now" : `${j} ago`, x, L.stripY + 28);
-    }
-    // NARMA10 marker at 9 steps ago
-    const x9 = x0 + (HISTORY - 1 - 9) * dx + 18;
-    g.strokeStyle = ink; g.globalAlpha = 0.6; g.setLineDash([3, 4]);
-    g.beginPath(); g.moveTo(x9 - 26, L.stripY - 26); g.lineTo(x9 - 26, L.stripY + 40); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
-    g.textAlign = "left"; g.fillStyle = muted; g.font = font(12, 400);
-    g.fillText("↑ NARMA10 needs inputs back to here", x9 - 30, L.stripY + 52);
+    // chart
+    const tp = [], pp = [];
+    for (let j = T0; j < T0 + WIN; j++) { tp.push(`${cx(j).toFixed(1)},${cy(data.d[j]).toFixed(1)}`); pp.push(`${cx(j).toFixed(1)},${cy(r.pred[j]).toFixed(1)}`); }
+    truthLine.setAttribute("points", tp.join(" "));
+    predLine.setAttribute("points", pp.join(" "));
+    marker.setAttribute("x1", cx(k)); marker.setAttribute("x2", cx(k));
+    dotT.setAttribute("cx", cx(k)); dotT.setAttribute("cy", cy(data.d[k]));
+    dotP.setAttribute("cx", cx(k)); dotP.setAttribute("cy", cy(r.pred[k]));
+
+    document.getElementById("score").innerHTML = `<span>Error (NMSE)</span>${r.testNmse.toFixed(2)}`;
+    document.getElementById("status").textContent = `Step ${k - T0} of ${WIN}`;
   }
 
-  function drawPred() {
-    const c = $("pred"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
-    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
-    const g = c.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
-    const m = models[mode], n = 50, k0 = k - n + 1, lo = 0.1, hi = 0.8;
-    const X = (i) => 12 + ((W - 24) * i) / (n - 1), Y = (v) => 10 + (H - 20) * (1 - (v - lo) / (hi - lo));
-    for (const [arr, col, w] of [[data.d, css("--ink"), 2], [m.fit.pred, css("--laser"), 2]]) {
-      g.strokeStyle = col; g.lineWidth = w; g.beginPath();
-      for (let i = 0; i < n; i++) { const x = X(i), y = Y(arr[k0 + i]); i ? g.lineTo(x, y) : g.moveTo(x, y); }
-      g.stroke(); g.fillStyle = col; g.beginPath(); g.arc(X(n - 1), Y(arr[k]), 4, 0, 7); g.fill();
-    }
+  function setMode(next) {
+    mode = next;
+    document.getElementById("on").setAttribute("aria-pressed", String(mode === "on"));
+    document.getElementById("off").setAttribute("aria-pressed", String(mode === "off"));
+    render();
+  }
+  const go = (dk) => { k = T0 + ((k - T0 + dk + WIN) % WIN); render(); };
+  function togglePlay() {
+    const b = document.getElementById("play");
+    if (timer) { clearInterval(timer); timer = null; b.textContent = "▶ Play"; }
+    else { timer = setInterval(() => go(1), 450); b.textContent = "❚❚ Pause"; }
   }
 
-  function verdict() {
-    const m = models[mode], mem = m.curves.memory;
-    let held = 0;
-    while (held < mem.length && mem[held] > 0.5) held++;
-    const steps = held >= HISTORY ? `${HISTORY - 1}+` : String(Math.max(0, held - 1));
-    $("verdict").innerHTML = mode === "on"
-      ? `Loop on: the laser still holds inputs from <b>${steps}</b> steps ago. Prediction score <b>${m.fit.testNmse.toFixed(2)}</b>.`
-      : `Loop off: the laser holds inputs from only <b>${steps}</b> steps ago. Prediction score <b>${m.fit.testNmse.toFixed(2)}</b>.`;
-  }
+  document.getElementById("on").onclick = () => setMode("on");
+  document.getElementById("off").onclick = () => setMode("off");
+  document.getElementById("prev").onclick = () => go(-1);
+  document.getElementById("next").onclick = () => go(1);
+  document.getElementById("play").onclick = togglePlay;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft") go(-1);
+    else if (e.key === "ArrowRight") go(1);
+    else if (e.key === " " && e.target === document.body) { e.preventDefault(); togglePlay(); }
+  });
+  chart.addEventListener("click", (e) => {
+    const p = chart.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    const x = p.matrixTransform(chart.getScreenCTM().inverse()).x;
+    k = T0 + Math.round(Math.max(0, Math.min(WIN - 1, ((x - C.l) / (C.r - C.l)) * (WIN - 1))));
+    render();
+  });
+  chart.style.cursor = "pointer";
 
-  function draw() { drawScene(); drawPred(); }
-
-  function next() {
-    k = k + 1 >= Core.K ? TEST0 + 30 : k + 1;
-  }
-  function frame(t) {
-    if (playing) {
-      if (lastT !== null) phase += (t - lastT) / STEP_MS;
-      while (phase >= 1) { phase -= 1; next(); }
-    }
-    lastT = t;
-    draw();
-    requestAnimationFrame(frame);
-  }
-
-  function setMode(m) {
-    mode = m;
-    $("on").setAttribute("aria-pressed", m === "on"); $("off").setAttribute("aria-pressed", m === "off");
-    verdict(); draw();
-  }
-  $("on").addEventListener("click", () => setMode("on"));
-  $("off").addEventListener("click", () => setMode("off"));
-  $("play").addEventListener("click", () => { playing = !playing; $("play").textContent = playing ? "❚❚ Pause" : "▶ Play"; });
-  $("step").addEventListener("click", () => { playing = false; $("play").textContent = "▶ Play"; phase = 0; next(); draw(); });
-
-  models.on = build(CONFIGS.on);
-  models.off = build(CONFIGS.off);
-  phase = 0.45;
-  setMode("on");
-  new ResizeObserver(draw).observe($("scene"));
-  requestAnimationFrame(frame);
+  // compute both versions once, after the page has painted
+  setTimeout(() => {
+    models.on = build(CFG.on);
+    models.off = build(CFG.off);
+    render();
+  }, 30);
 })();
 </script>

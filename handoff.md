@@ -22,7 +22,7 @@ Read this first, then `context.md` (the assignment), `explanation_instructions.m
 
 **History worth knowing (to explain if asked):** the first Section 3 grid used γ ≥ 0.5 and gave B = 0.46. That led to a wrong early conclusion that memory was B's main limit. Widening the grid to small γ fixed it.
 
-**Visualization:** `visualization/` holds one animated scene that runs the laser reservoir live in the browser, with a delay-loop on/off switch. Edit `template.html` or `core.js`, then run `python3 visualization/build.py` to rebuild `laser_reservoir.html`. View it on localhost: `python3 -m http.server 8000 --directory visualization`, then open http://localhost:8000/laser_reservoir.html. Do not publish it as a claude.ai artifact. `node visualization/test_core.js` checks the browser simulation against the notebook (Laser B, N = 100: test NMSE ≈ 0.13).
+**Visualization:** `visualization/` holds one diagram that runs the laser reservoir live in the browser: input → reservoir (pump, laser, 100 recordings, delay loop) → trained weights → sum → prediction, with a loop on/off switch and a prediction-vs-truth chart. Pick a step by clicking the chart, with ← →, or with Play. Edit `template.html` or `core.js`, then run `python3 visualization/build.py` to rebuild `laser_reservoir.html`. View it on localhost: `python3 -m http.server 8000 --directory visualization`, then open http://localhost:8000/laser_reservoir.html. Do not publish it as a claude.ai artifact. `node visualization/test_core.js` checks the browser simulation against the notebook (Laser B, N = 100: test NMSE ≈ 0.13).
 
 ## Noise (Section 5, done)
 
@@ -37,7 +37,6 @@ With the laser's own quantum noise, the laser reservoir loses its advantage: Las
 ## Remaining deliverables (from `context.md`)
 
 - 3–5 slide presentation: approach, results (including noise), next steps.
-- Visualization redesign agreed but not built: one frame, input → [reservoir: pump, laser, loop, 100 recordings] → weights → Σ → prediction, with a loop on/off switch and the prediction vs truth line. The current `visualization/` page is the older one-scene version.
 - Check that the notebook runs in Colab.
 - Commit and push (only when I ask).
 
