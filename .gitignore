@@ -2,3 +2,4 @@ context.md
 explanation_instructions.md
 *.pdf
 __pycache__/
+slides/

@@ -36,7 +36,7 @@ With the laser's own quantum noise, the laser reservoir loses its advantage: Las
 
 ## Remaining deliverables (from `context.md`)
 
-- 3–5 slide presentation: approach, results (including noise), next steps.
+- Slides: done. `slides/laser_reservoir_slides.pptx` (5 slides, speaker notes included). The `slides/` folder is git-ignored, so it exists only on this computer. Rebuild with `npm install --prefix slides` (once), then `node slides/build_slides.js`. Charts read `results/*.json`.
 - Check that the notebook runs in Colab.
 - Commit and push (only when I ask).
 
