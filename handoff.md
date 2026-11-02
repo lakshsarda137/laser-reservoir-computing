@@ -4,7 +4,7 @@ Read this first, then `context.md` (the assignment), `writing_principles.md` (ho
 
 ## Current state
 
-`laser_reservoir.ipynb` has six sections (0–5), all working. The whole notebook runs in about 1.5 minutes. Sections 4 and 5 use saved search results: from `results/*.json` if those files exist, otherwise from copies inside the notebook. So the notebook runs with no other files. If a search is run again, update the copies too. To recompute Section 4, set `RECOMPUTE_SWEEP = True` (about 8 extra minutes).
+`laser_reservoir.ipynb` has seven sections (0–6), all working. Section 6 lists the assumptions, as Fred asked, and has no code. The whole notebook runs in about 1.5 minutes. Sections 4 and 5 use saved search results: from `results/*.json` if those files exist, otherwise from copies inside the notebook. So the notebook runs with no other files. If a search is run again, update the copies too. To recompute Section 4, set `RECOMPUTE_SWEEP = True` (about 8 extra minutes).
 
 | Notebook section | What it does | Result (test NMSE) |
 |---|---|---|
@@ -14,6 +14,7 @@ Read this first, then `context.md` (the assignment), `writing_principles.md` (ho
 | 3 | Laser as reservoir: A = no feedback, B = delay loop, tuned on validation | A: 0.648, B: 0.115. Linear memory reference: 0.326 |
 | 4 | Exploration: photon lifetime τ_c = 0.003–0.3 | B: 0.131 → best 0.081 (τ_c = 0.1) → 0.109. A stays ≥ 0.44 |
 | 5 | The laser's own quantum noise, re-tuned, β = 1e-2 to 1e-5 | B: 0.61–0.71, A: 0.70–0.77 |
+| 6 | Assumptions, and whether each one is tested | — |
 
 **Main findings:**
 - The laser particle alone (A) fails NARMA10. Its memory lasts about 2 input steps; NARMA10 needs 9.
@@ -36,7 +37,7 @@ With the laser's own quantum noise, the laser reservoir loses its advantage: Las
 
 ## Remaining deliverables (from `context.md`)
 
-- Slides: done. `slides/laser_reservoir_slides.pptx` (5 slides, speaker notes included). The `slides/` folder is git-ignored, so it exists only on this computer. Rebuild with `npm install --prefix slides` (once), then `node slides/build_slides.js`. Charts read `results/*.json`.
+- Slides: done. `slides/laser_reservoir_slides.pptx` (5 slides, speaker notes included). The `slides/` folder is git-ignored, so it exists only on this computer. Rebuild with `npm install --prefix slides` (once), `python3 slides/export_predictions.py` (about 1 minute, for the slide 3 prediction chart), then `node slides/build_slides.js`. Charts read `results/*.json` and `slides/prediction_example.json`.
 - Check that the notebook runs in Colab.
 - Commit and push (only when I ask).
 
