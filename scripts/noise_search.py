@@ -2,7 +2,7 @@
 
 Writes results/noise_search.json. Run from the project folder:  python3 scripts/noise_search.py
 Uses the same data, split, masks and readout as laser_reservoir.ipynb (Sections 0 and 3).
-Takes about 3 minutes with 8 processes.
+Takes about 5 minutes with 8 processes.
 """
 import os
 

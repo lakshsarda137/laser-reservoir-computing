@@ -4,7 +4,7 @@ Read this first, then `context.md` (the assignment), `writing_principles.md` (ho
 
 ## Current state
 
-`laser_reservoir.ipynb` has six sections (0–5), all working. The whole notebook runs in about 1.5 minutes. Section 4 loads its search results from `results/tau_c_sweep.json`; deleting that file makes it recompute them (about 8 extra minutes).
+`laser_reservoir.ipynb` has six sections (0–5), all working. The whole notebook runs in about 1.5 minutes. Sections 4 and 5 use saved search results: from `results/*.json` if those files exist, otherwise from copies inside the notebook. So the notebook runs with no other files. If a search is run again, update the copies too. To recompute Section 4, set `RECOMPUTE_SWEEP = True` (about 8 extra minutes).
 
 | Notebook section | What it does | Result (test NMSE) |
 |---|---|---|
