@@ -1,6 +1,6 @@
 # Handoff
 
-Read this first, then `context.md` (the assignment), `explanation_instructions.md` (how to explain things to me), and `choices.md` (every choice so far, with reasons).
+Read this first, then `context.md` (the assignment), `writing_principles.md` (how to explain things to me), and `choices.md` (every choice so far, with reasons).
 
 ## Current state
 
@@ -55,7 +55,7 @@ With the laser's own quantum noise, the laser reservoir loses its advantage: Las
 
 ## How I like to work
 
-- Short replies. Follow `explanation_instructions.md` when explaining. Define every technical word.
+- Short replies. Follow `writing_principles.md` when explaining. Define every technical word.
 - Add every non-obvious choice to `choices.md`, with the reason.
 - If you find you said something wrong earlier, say so plainly.
-- Commit and push only when I ask. The repo is `lakshsarda137/laser-reservoir-computing` (private). The PDFs, `context.md` and `explanation_instructions.md` are gitignored.
+- Commit and push only when I ask. The repo is `lakshsarda137/laser-reservoir-computing` (private). The PDFs, `context.md` and `writing_principles.md` are gitignored.

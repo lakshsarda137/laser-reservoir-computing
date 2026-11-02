@@ -1,5 +1,6 @@
 context.md
-explanation_instructions.md
 *.pdf
 __pycache__/
 slides/
+writing_principles.md
+CLAUDE.local.md
