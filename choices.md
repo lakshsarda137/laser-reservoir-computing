@@ -89,6 +89,18 @@ Non-obvious choices in `laser_reservoir.ipynb`, and why they were made.
 | Search location | `scripts/noise_search.py`, results in `results/noise_search.json` | It takes about 5 minutes with 8 processes, too slow to rerun inside the notebook. Same data, split, masks, solver and readout as the notebook. |
 | Recording | value at the end of the slot (as before); slot average checked as an alternative | A real detector integrates light over the slot. Averaging helped a little (0.649 → 0.544) without changing the conclusion. |
 
+## Averaging test (not in the notebook)
+
+Tests whether averaging M measurements reduces the noise enough to help Laser B. Script: `scripts/averaging_test.py`. Results: `results/averaging_test.json`.
+
+| Choice | Value | Why |
+|---|---|---|
+| Two methods | Repeats: M runs of one laser, each with its own loop. Particles: M particles with the same pump and one shared loop that adds back their average light. | These are the two ways to average. The shared loop also reduces the noise in the loop. |
+| Settings | β = 1e-3, p_bias = 1.1, θ = 0.2, η = 0.3. γ = 0.05, 0.2, 0.5. M = 1, 4, 16, 64, 256. 3 masks. | A small test, to limit run time. p_bias, θ and η were not searched. |
+| Best-case check | Noise-free recordings plus random numbers of size noise/√M | Shows the limit of averaging when the laser's own motion and the loop have no noise. It costs little, so it reaches M of about one million. |
+
+Result: averaging barely helps. With γ chosen on validation, the test NMSE goes from 0.736 (M = 1) to 0.673 (repeats, M = 256) and 0.677 (particles, M = 256). In the best-case check, M of about one million still gives about 0.50. Both are worse than the linear memory reference (0.326).
+
 ## Open points
 
 - Our ESN gets test NMSE ≈ 0.067 (NRMSE ≈ 0.26). Appeltant's traditional RC reports NMSE ≈ 0.032. Their reservoir design and training length are not fully given, so this gap is not resolved.

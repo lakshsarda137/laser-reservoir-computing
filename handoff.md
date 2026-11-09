@@ -29,6 +29,10 @@ Read this first, then `context.md` (the assignment), `writing_principles.md` (ho
 
 With the laser's own quantum noise, the laser reservoir loses its advantage: Laser B scores 0.67 at β = 1e-3 and at best 0.61 with about 15,000 photons, worse than the linear memory reference (0.33). Near threshold the noise in each recording is about 20× the change the inputs cause. The search is in `scripts/noise_search.py` (about 5 minutes), results in `results/noise_search.json`.
 
+## Averaging test (done, not in the notebook or slides)
+
+Averaging repeated runs or many particles barely helps: test NMSE goes from 0.736 (M = 1) to 0.673 at best (M = 256). Even the best-case check, with about one million averages, gives about 0.50, worse than the linear memory reference (0.326). See `scripts/averaging_test.py` and `results/averaging_test.json`. Slide 5 still lists "Many particles" as a next step.
+
 ## Other open points
 
 - At τ_c = 0.3, several best settings sit at the grid edge.
