@@ -12,7 +12,7 @@ Non-obvious choices in `laser_reservoir.ipynb`, and why they were made.
 | Split | 3000 train / 800 validation / 1000 test | Settings are chosen on validation. Test is used once, for the final score, so the score is not tuned to the test data. |
 | Final training set | train + validation (3800 steps) | After settings are fixed, more training data gives a better readout. |
 | Blow-up check | stop if y is not finite or y > 10 | NARMA10 can diverge for rare inputs. |
-| Metric | NMSE (Appeltant reports NRMSE = √NMSE) | The assignment asks for NMSE. |
+| Metric | NMSE (Appeltant reports NRMSE = √NMSE) | Error divided by the variance of the target. 0 is perfect; 1 is no better than always predicting the mean. |
 
 ## ESN
 
@@ -25,25 +25,25 @@ Non-obvious choices in `laser_reservoir.ipynb`, and why they were made.
 | Readout features | [x(k), u(k), 1] | Raw input and a constant are standard in ESN readouts. Use the same extra features for the laser reservoir so the comparison is fair. |
 | Number of random reservoirs | 3 for tuning, 10 for final score | One random reservoir can be lucky or unlucky. Report mean ± std. |
 
-## Laser on its own (Step 2)
+## Laser on its own (Section 2)
 
 | Choice | Value | Why |
 |---|---|---|
-| Equations | Cho et al. PRL 2016, Eqs. 1–2, unchanged | These are the lab's own model of its laser particles. |
+| Equations | Cho et al. PRL 2016, Eqs. 1–2, unchanged | This is the published model of these laser particles. |
 | Time unit | τ = 1 (carrier lifetime) | All times are then multiples of τ. With τ ≈ 2 ns for perovskite, 1 time unit = 2 ns. |
 | Photon lifetime τ_c | 0.01 τ | Photons must leave much faster than carriers decay. Real values may be shorter still. 0.01 keeps the simulation fast, and it is a parameter we can vary later. |
 | β | 1e-3 | Close to the paper's fitted 1.3e-3. Gives a clear threshold. |
 | Normalized outputs | p = P/P_th, n = N₁/N_th, L = β·q | Threshold is at p = 1 and n = 1 for any τ_c and β. L is the paper's Eq. 3 quantity. |
-| Solver | 4th-order Runge–Kutta, fixed step dt = 1e-3 τ (τ_c/10) | A fixed step makes it easy to hold the pump constant within a step, which Step 3 needs. Halving dt changes the output by less than 1e-8 (relative). |
-| Pump within a step | constant | The pump in Step 3 is piecewise constant, so this is exact there. |
+| Solver | 4th-order Runge–Kutta, fixed step dt = 1e-3 τ (τ_c/10) | A fixed step makes it easy to hold the pump constant within a step, which Section 3 needs. Halving dt changes the output by less than 1e-8 (relative). |
+| Pump within a step | constant | The pump in Section 3 is piecewise constant, so this is exact there. |
 | Noise | none | Keeps the first results easy to interpret. Spontaneous emission noise can be added later. |
 | Starting state | N₁ = 0, q = 0, or the steady state for the small-step test | The β·N₁/τ term creates the first photons, so q = 0 is a valid start. |
 
-## Laser as a reservoir (Step 3)
+## Laser as a reservoir (Section 3)
 
 | Choice | Value | Why |
 |---|---|---|
-| Two versions | A: no feedback. B: delay loop | A tests the laser particle alone, which is closest to Fred's question. B tests the particle inside Appeltant's design. A real particle has no loop; adding one needs extra hardware (detector, delay, pump modulator). |
+| Two versions | A: no feedback. B: delay loop | A tests the laser particle alone, which is closest to the question of whether one particle can work as a reservoir. B tests the particle inside Appeltant's design. A real particle has no loop; adding one needs extra hardware (detector, delay, pump modulator). |
 | Where the input goes | the pump: p = p_bias + γ·mask_i·u(k) (+ η·L(t − delay)) | The pump is the only input the paper's model has. |
 | Number of virtual nodes N | 100 | Same as the ESN, so both readouts get the same number of features. |
 | Mask | uniform random in [−1, 1], fixed | In an early search, a ±1 mask (Appeltant's choice) was a little worse. That search only tried γ ≥ 0.5. |
@@ -66,7 +66,7 @@ Non-obvious choices in `laser_reservoir.ipynb`, and why they were made.
 
 | Choice | Value | Why |
 |---|---|---|
-| Parameter | τ_c | Memory limited the laser in Section 3, and τ_c sets the laser's response speed. It is a particle-design property, so the result is useful to the lab. Not chosen: β (tests nonlinearity), p_bias (already in the search), N (does not directly test memory). |
+| Parameter | τ_c | Memory limited the laser in Section 3, and τ_c sets the laser's response speed. It is a particle-design property, so the result is useful for particle design. Not chosen: β (tests nonlinearity), p_bias (already in the search), N (does not directly test memory). |
 | Values | 0.003, 0.01, 0.03, 0.1, 0.3 τ | A 100-fold range around the main value 0.01. Real perovskite particles are probably below 0.01. |
 | Fixed | β = 1e-3, N = 100, data, split, masks | Change one thing at a time. |
 | Threshold | pumps given as p = P/P_th | P_th = 1/(β·τ_c) changes with τ_c. Using p keeps the operating point the same. |

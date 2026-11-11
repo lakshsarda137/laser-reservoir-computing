@@ -4,3 +4,5 @@ __pycache__/
 slides/
 writing_principles.md
 CLAUDE.local.md
+handoff.md
+.DS_Store
